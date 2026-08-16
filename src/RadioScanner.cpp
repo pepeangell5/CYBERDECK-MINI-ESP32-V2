@@ -56,8 +56,8 @@ static const uint8_t wifiToNrfMap[14] = {
 enum ScanMode { MODE_SPECTRUM = 0, MODE_WATERFALL = 1, MODE_CHANNEL = 2 };
 static ScanMode currentMode = MODE_SPECTRUM;
 
-static RF24 radio1(NRF1_CE_PIN, NRF1_CSN_PIN);
-static RF24 radio2(NRF2_CE_PIN, NRF2_CSN_PIN);
+static RF24 radio1(NRF1_CE_PIN, NRF1_CSN_PIN, NRF_SPI_SPEED);
+static RF24 radio2(NRF2_CE_PIN, NRF2_CSN_PIN, NRF_SPI_SPEED);
 static RF24* scanRadios[] = { &radio1, &radio2 };
 static bool scanRadioOk[] = { false, false };
 static const uint8_t scanRadioCount = sizeof(scanRadios) / sizeof(scanRadios[0]);

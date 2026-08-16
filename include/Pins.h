@@ -8,6 +8,9 @@
 #define MOSI_PIN  11
 #define MISO_PIN  13
 
+// Slower nRF24 SPI improves detection on shared bus / wired modules.
+#define NRF_SPI_SPEED 1000000
+
 // nRF24 #1
 #define NRF1_CE_PIN   4
 #define NRF1_CSN_PIN  5

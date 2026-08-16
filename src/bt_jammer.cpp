@@ -10,8 +10,8 @@
 
 extern DisplayTFT tft;
 
-static RF24 btJam1(NRF1_CE_PIN, NRF1_CSN_PIN);
-static RF24 btJam2(NRF2_CE_PIN, NRF2_CSN_PIN);
+static RF24 btJam1(NRF1_CE_PIN, NRF1_CSN_PIN, NRF_SPI_SPEED);
+static RF24 btJam2(NRF2_CE_PIN, NRF2_CSN_PIN, NRF_SPI_SPEED);
 static bool btJam1Ok = false;
 static bool btJam2Ok = false;
 static bool isBtJamming = false;
