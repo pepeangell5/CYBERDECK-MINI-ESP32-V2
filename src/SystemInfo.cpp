@@ -99,7 +99,7 @@ static void drawStaticLayout() {
 
     // Footer
     tft.drawFastHLine(0, 218, 320, UI_ACCENT);
-    drawStringCustom(10, 225, "OK (HOLD): BACK TO MENU", UI_ACCENT, 1);
+    drawStringCustom(10, 225, "BACK / OK(HOLD): BACK TO MENU", UI_ACCENT, 1);
 }
 
 // Dibuja la información estática (no cambia en runtime)

@@ -116,14 +116,22 @@ static SpamMode activeMode = SPAM_APPLE;
 static void prepareBleSpamDisplay() {
     pinMode(TFT_CS_PIN, OUTPUT);
     pinMode(NRF1_CSN_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
+#endif
 
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     digitalWrite(TFT_CS_PIN, HIGH);
     delayMicroseconds(80);
 }
@@ -294,7 +302,7 @@ static bool showDisclaimer() {
     while (true) {
         if (isEnterPressed()) {
             beep(2200, 60);
-            while (isEnterPressed()) delay(5);
+            while (isEnterPressed() || isBackPressed()) delay(5);
             flushNavInput(80);
             return true;
         }

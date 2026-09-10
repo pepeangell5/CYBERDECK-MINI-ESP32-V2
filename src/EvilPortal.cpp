@@ -261,18 +261,18 @@ static bool showDisclaimer() {
     drawStringCustom(10, y, "100% responsabilidad tuya.",          UI_MAIN, 1);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: ACEPTAR   UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: ACEPTAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2200, 60);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(1000, 80);
-            while (navUpPressed() || navDownPressed()) delay(5);
+            while (navBackPressed() || navUpPressed() || navDownPressed()) delay(5);
             delay(100);
             return false;
         }
@@ -307,7 +307,7 @@ static void drawMainMenu(int cursor) {
     int logCount = portalLogCount();
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
     drawStringCustom(10, 222,
-        "Logs:" + String(logCount) + "/" + String(MAX_LOGS) + "  OK(HOLD):BACK",
+        "Logs:" + String(logCount) + "/" + String(MAX_LOGS) + "  BACK/OK(H):BACK",
         UI_ACCENT, 1);
 }
 
@@ -315,6 +315,11 @@ static int selectMainMenu() {
     int cursor = 0;
     drawMainMenu(cursor);
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor + 2) % 3;
             beep(2100, 20);
@@ -373,11 +378,16 @@ static int selectMode() {
         }
 
         tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-        drawStringCustom(10, 222, "OK:SELECT  OK(HOLD):BACK", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
     };
     draw();
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor + 1) % 2;
             beep(2100, 20); draw(); delay(180);
@@ -437,11 +447,16 @@ static int selectPresetSSID() {
         }
 
         tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-        drawStringCustom(10, 222, "OK:START  OK(HOLD):BACK", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK:START  BACK/OK(H):BACK", UI_ACCENT, 1);
     };
     draw();
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor + total - 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
@@ -585,11 +600,16 @@ static int selectCloneTarget() {
         }
 
         tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-        drawStringCustom(10, 222, "OK:CLONE  OK(HOLD):BACK", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK:CLONE  BACK/OK(H):BACK", UI_ACCENT, 1);
     };
     draw();
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor + total - 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
@@ -643,7 +663,7 @@ static void drawDashboardFrame() {
     drawStringCustom(15, 116, "ULTIMA CAPTURA:", UI_SELECT, 1);
 
     tft.drawFastHLine(0, 210, 320, UI_SELECT);
-    drawStringCustom(10, 218, "OK(HOLD):STOP  DOWN:LOGS", TFT_RED, 1);
+    drawStringCustom(10, 218, "BACK/OK(H):STOP  DOWN:LOGS", TFT_RED, 1);
 }
 
 static void drawDashboardStats() {
@@ -697,6 +717,12 @@ static void runPortalLoop() {
         dnsServer.processNextRequest();
         httpServer.handleClient();
 
+        if (navBackPressed()) {
+            stopAttack = true;
+            while (navBackPressed()) delay(5);
+            continue;
+        }
+
         if (g_cloneMode && g_doDeauth &&
             millis() - lastDeauth > 30) {
             sendDeauthToVictimNetwork();
@@ -741,7 +767,7 @@ static void runPortalLoop() {
     beep(1800, 40); delay(20);
     beep(1200, 60);
 
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(150);
 }
 
@@ -844,9 +870,9 @@ static void showLogExportResult(bool ok, int exportedCount) {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK: Back", UI_ACCENT, 1);
-    while (!navEnterPressed()) delay(20);
-    while (navEnterPressed()) delay(5);
+    drawStringCustom(10, 222, "OK/BACK: Back", UI_ACCENT, 1);
+    while (!navEnterPressed() && !navBackPressed()) delay(20);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(80);
 }
 
@@ -869,11 +895,11 @@ static void showLogDetail(const PortalLog& log) {
                   UI_ACCENT, 296, 1);
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK: Back", UI_ACCENT, 1);
+    drawStringCustom(10, 222, "OK/BACK: Back", UI_ACCENT, 1);
 
-    while (!navEnterPressed()) delay(20);
+    while (!navEnterPressed() && !navBackPressed()) delay(20);
     beep(1800, 40);
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 }
 
@@ -886,10 +912,10 @@ static void viewLogs() {
         tft.drawFastHLine(0, 30, 320, UI_ACCENT);
         drawStringCustom(50, 110, "No hay capturas guardadas.", UI_ACCENT, 1);
         drawStringCustom(50, 125, "Intenta un ataque primero.", UI_ACCENT, 1);
-        drawStringCustom(10, 222, "OK: Back", UI_ACCENT, 1);
-        while (!navEnterPressed()) delay(20);
+        drawStringCustom(10, 222, "OK/BACK: Back", UI_ACCENT, 1);
+        while (!navEnterPressed() && !navBackPressed()) delay(20);
         beep(1800, 40);
-        while (navEnterPressed()) delay(5);
+        while (navEnterPressed() || navBackPressed()) delay(5);
         return;
     }
 
@@ -934,7 +960,7 @@ static void viewLogs() {
         }
 
         tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-        drawStringCustom(10, 222, "OK:VER  BACK:SAVE SD  OK(H):BACK", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK:VER  OK(H):SAVE SD  BACK:BACK", UI_ACCENT, 1);
     };
     draw();
 
@@ -953,18 +979,23 @@ static void viewLogs() {
         }
         if (navBackPressed()) {
             while (navBackPressed()) delay(5);
-            int exported = 0;
-            bool ok = exportLogsToSd(exported);
-            beep(ok ? 2400 : 900, 60);
-            showLogExportResult(ok, exported);
-            draw();
+            beep(1000, 40);
             delay(120);
+            break;
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
             beep(held ? 1000 : 1800, 40);
             delay(100);
-            if (held) break;
+            if (held) {
+                int exported = 0;
+                bool ok = exportLogsToSd(exported);
+                beep(ok ? 2400 : 900, 60);
+                showLogExportResult(ok, exported);
+                draw();
+                delay(120);
+                continue;
+            }
             PortalLog log;
             if (portalLogGet(cursor, log)) {
                 showLogDetail(log);
@@ -991,18 +1022,18 @@ static bool confirmClearLogs() {
     drawStringCustom(30, 132, "deshacer.",                UI_ACCENT, 1);
 
     tft.drawFastHLine(0, 210, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: SI BORRAR   UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: SI BORRAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(1200, 80);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(2000, 40);
-            while (navUpPressed() || navDownPressed()) delay(5);
+            while (navBackPressed() || navUpPressed() || navDownPressed()) delay(5);
             delay(100);
             return false;
         }
@@ -1061,7 +1092,7 @@ static void startAttackFlow() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void runEvilPortal() {
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     if (!showDisclaimer()) return;

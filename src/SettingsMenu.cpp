@@ -13,7 +13,7 @@ static const int MENU_ITEMS = 3;
 // ═══════════════════════════════════════════════════════════════════════════
 static void runForgetWifi() {
     // Esperar liberación de OK
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     // Caso 1: no hay red guardada
@@ -26,13 +26,13 @@ static void runForgetWifi() {
         drawStringCustom(40, 90, "SIN RED GUARDADA", UI_ACCENT, 2);
         drawStringCustom(40, 130, "No hay credenciales WiFi", TFT_WHITE, 1);
         drawStringCustom(40, 145, "guardadas en este momento.", TFT_WHITE, 1);
-        drawStringCustom(10, 222, "OK: Volver", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK/BACK: Volver", UI_ACCENT, 1);
 
         beep(1500, 60);
 
-        while (!navEnterPressed()) delay(20);
+        while (!navEnterPressed() && !navBackPressed()) delay(20);
         beep(1800, 40);
-        while (navEnterPressed()) delay(5);
+        while (navEnterPressed() || navBackPressed()) delay(5);
         delay(100);
         return;
     }
@@ -61,12 +61,12 @@ static void runForgetWifi() {
     drawStringCustom(20, 168, "que escoger una red de nuevo.", UI_ACCENT, 1);
 
     tft.drawFastHLine(0, 210, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: SI BORRAR   UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: SI BORRAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(1200, 80);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
 
             // Borrar credenciales
@@ -83,9 +83,9 @@ static void runForgetWifi() {
             delay(1500);
             return;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(2000, 40);
-            while (navUpPressed() || navDownPressed())
+            while (navBackPressed() || navUpPressed() || navDownPressed())
                 delay(5);
             delay(100);
             return;
@@ -129,7 +129,7 @@ void drawSettings() {
     }
 
     tft.drawFastHLine(0, 210, 320, TFT_WHITE);
-    drawStringCustom(10, 220, "OK: SELECT   OK(HOLD): BACK", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: SELECT   BACK/OK(H): EXIT", UI_ACCENT, 1);
 }
 
 void runSettings() {
@@ -137,7 +137,7 @@ void runSettings() {
     cursor = 0;
 
     // Evitar doble OK
-    while (navEnterPressed());
+    while (navEnterPressed() || navBackPressed());
     delay(150);
 
     bool exitMenu = false;
@@ -145,6 +145,14 @@ void runSettings() {
     drawSettings();
 
     while (!exitMenu) {
+
+        if (navBackPressed()) {
+            exitMenu = true;
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            delay(120);
+            continue;
+        }
 
         if (navDownPressed()) {
             cursor = (cursor + 1) % MENU_ITEMS;
@@ -178,7 +186,7 @@ void runSettings() {
             }
             else if (cursor == 2) {
                 // Esperar liberación antes de entrar a la sub-pantalla
-                while (navEnterPressed());
+                while (navEnterPressed() || navBackPressed());
                 delay(100);
                 runForgetWifi();
             }

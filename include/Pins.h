@@ -11,6 +11,10 @@
 // Slower nRF24 SPI improves detection on shared bus / wired modules.
 #define NRF_SPI_SPEED 1000000
 
+// Set to 1 when the second nRF24 module is installed on CE 6 / CSN 7.
+#define NRF2_ENABLED 1
+#define NRF_RADIO_COUNT (NRF2_ENABLED ? 2 : 1)
+
 // nRF24 #1
 #define NRF1_CE_PIN   4
 #define NRF1_CSN_PIN  5

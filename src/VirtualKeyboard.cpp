@@ -212,7 +212,7 @@ static void drawHeader(const String& title, const String& subtitle) {
 
 static void drawFooter() {
     tft.drawFastHLine(0, 224, 320, UI_ACCENT);
-    drawStringCustom(8, 230, "UP/DN:NAV  OK:SELECT", UI_ACCENT, 1);
+    drawStringCustom(8, 230, "UP/DN:NAV  OK:SELECT  BACK:CANCEL", UI_ACCENT, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -307,7 +307,7 @@ String virtualKeyboardInput(const String& title,
                             int maxLen,
                             bool maskInput) {
     // Esperar liberación de OK (por si venimos presionando)
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     // Reset estado
@@ -329,6 +329,13 @@ String virtualKeyboardInput(const String& title,
     unsigned long lastBtn = 0;
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1200, 80);
+            while (navBackPressed()) delay(5);
+            delay(50);
+            return "";
+        }
+
         // Blink cursor
         if (millis() - lastBlink > 500) {
             drawTextBox();
@@ -354,7 +361,7 @@ String virtualKeyboardInput(const String& title,
         // OK
         if (navEnterPressed() && millis() - lastBtn > 180) {
             int result = executeCurrentKey();
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(50);
 
             if (result == 1) {

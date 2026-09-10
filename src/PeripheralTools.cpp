@@ -52,8 +52,10 @@ static bool beginSd() {
     digitalWrite(TFT_CS_PIN, HIGH);
     pinMode(NRF1_CSN_PIN, OUTPUT);
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
 
     const uint32_t speeds[] = { 4000000, 10000000, 20000000 };
@@ -303,6 +305,102 @@ static void runGpsStats() {
         }
     }
     while (isEnterPressed() || isBackPressed()) delay(5);
+}
+
+static void runGpsFixAssist() {
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    beginGpsPort();
+    drawToolFrame("GPS FIX ASSIST");
+    drawStringCustom(8, 222, "BACK:EXIT  OK:RESET TIMER", TFT_WHITE, 1);
+    beep(1800, 25);
+
+    unsigned long sessionStart = millis();
+    unsigned long lastDraw = 0;
+    unsigned long lastRateTick = millis();
+    unsigned long lastChars = gps.charsProcessed();
+    unsigned long startChars = gps.charsProcessed();
+    unsigned long nmeaRate = 0;
+
+    bool exitTool = false;
+    while (!exitTool) {
+        drainGps(90);
+
+        NavAction action = readNavAction(120);
+        if (action == NAV_BACK || isBackPressed()) {
+            exitTool = true;
+        } else if (action == NAV_ENTER) {
+            bool held = waitOkReleaseWasLong();
+            if (held) {
+                exitTool = true;
+            } else {
+                sessionStart = millis();
+                startChars = gps.charsProcessed();
+                lastChars = startChars;
+                lastRateTick = millis();
+                nmeaRate = 0;
+                flushNavInput(80);
+            }
+        }
+
+        if (millis() - lastRateTick >= 1000) {
+            unsigned long nowChars = gps.charsProcessed();
+            nmeaRate = nowChars - lastChars;
+            lastChars = nowChars;
+            lastRateTick = millis();
+        }
+
+        if (millis() - lastDraw > 350) {
+            unsigned long elapsedSec = (millis() - sessionStart) / 1000UL;
+            unsigned long newChars = gps.charsProcessed() - startChars;
+            bool hasNmea = newChars > 0 || nmeaRate > 0;
+            bool fix = gpsFreshFix(10000);
+            int sats = gpsSatCount();
+
+            tft.fillRect(8, 42, 304, 166, TFT_BLACK);
+            drawStringCustom(12, 48, "NMEA", TFT_CYAN, 1);
+            drawStringBig(64, 44, hasNmea ? "YES" : "NO", hasNmea ? TFT_GREEN : TFT_RED, 1);
+            drawStringCustom(138, 48, "RATE:" + String(nmeaRate) + "/s", TFT_WHITE, 1);
+            drawStringCustom(232, 48, "T+" + String(elapsedSec) + "s", TFT_WHITE, 1);
+
+            drawStringCustom(12, 76, "FIX", TFT_CYAN, 1);
+            drawStringBig(64, 72, fix ? "LOCK" : "WAIT", fix ? TFT_GREEN : TFT_YELLOW, 1);
+            drawStringCustom(138, 76, "SAT:" + String(sats), TFT_WHITE, 1);
+            drawStringCustom(210, 76, "HDOP:" + gpsHdopText(), TFT_WHITE, 1);
+
+            drawGpsQualityBar(12, 104, 132, 10, gpsQualityScore());
+            drawStringCustom(154, 102, "AGE " + gpsAgeText(), TFT_CYAN, 1);
+
+            if (!hasNmea && elapsedSec > 3) {
+                drawStringFit(12, 128, "No NMEA: check GPS TX->GPIO18, VCC, GND, baud 9600.",
+                              TFT_RED, 296, 1);
+            } else if (hasNmea && !fix && elapsedSec < 180) {
+                drawStringFit(12, 128, "GPS is talking. Go outdoors; cold fix may take 1-5 min.",
+                              TFT_YELLOW, 296, 1);
+            } else if (hasNmea && !fix) {
+                drawStringFit(12, 128, "Still no fix: antenna face up, clear sky, avoid USB/metal.",
+                              TFT_YELLOW, 296, 1);
+            } else {
+                drawStringFit(12, 128, "Fresh fix ready. Track Logger can save GPS points to SD.",
+                              TFT_GREEN, 296, 1);
+            }
+
+            drawStringCustom(12, 154, "RX:" + String(GPS_RX_PIN) +
+                " TX:" + String(GPS_TX_PIN) + " BAUD:" + String(GPS_BAUD), TFT_WHITE, 1);
+            drawStringCustom(12, 174, "Chars this screen: " + String(newChars), TFT_WHITE, 1);
+            if (gps.location.isValid()) {
+                drawStringFit(12, 192,
+                    String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6),
+                    TFT_CYAN, 296, 1);
+            }
+
+            lastDraw = millis();
+        }
+
+        delay(8);
+    }
+
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    flushNavInput(80);
 }
 
 static void runGpsConsole() {
@@ -676,6 +774,7 @@ void runGpsTools() {
     beginGpsPort();
     static const char* gpsItems[] = {
         "Dashboard Pro",
+        "Fix Assist",
         "Track Logger",
         "Compass",
         "Waypoint Mark",
@@ -692,14 +791,15 @@ void runGpsTools() {
         switch (choice) {
             case -1: exitSub = true;  break;
             case  0: runGpsProDashboard(); break;
-            case  1: runGpsTrackLogger();  break;
-            case  2: runGpsCompass();      break;
-            case  3: runGpsWaypointMarker(); break;
-            case  4: runGpsStatus();       break;
-            case  5: runGpsPosition();     break;
-            case  6: runGpsStats();        break;
-            case  7: runGpsConsole();      break;
-            case  8: exportGpsSnapshotReport(); break;
+            case  1: runGpsFixAssist();    break;
+            case  2: runGpsTrackLogger();  break;
+            case  3: runGpsCompass();      break;
+            case  4: runGpsWaypointMarker(); break;
+            case  5: runGpsStatus();       break;
+            case  6: runGpsPosition();     break;
+            case  7: runGpsStats();        break;
+            case  8: runGpsConsole();      break;
+            case  9: exportGpsSnapshotReport(); break;
         }
     }
 }
@@ -1658,8 +1758,13 @@ void runMissionDashboard() {
             }
 
             drawStringCustom(12, 150, "NRF", TFT_CYAN, 1);
+#if NRF2_ENABLED
             drawStringCustom(58, 146, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
                 " " + String(NRF2_CE_PIN) + "/" + String(NRF2_CSN_PIN), TFT_WHITE, 1);
+#else
+            drawStringCustom(58, 146, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
+                " single module", TFT_WHITE, 1);
+#endif
             drawStringCustom(58, 164, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) +
                 "/" + String(MOSI_PIN), TFT_WHITE, 1);
 

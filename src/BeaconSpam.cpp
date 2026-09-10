@@ -290,18 +290,18 @@ static bool showDisclaimer() {
     drawStringCustom(10, y, "Tu eres responsable del uso.", UI_MAIN, 1);
 
     tft.drawFastHLine(0, 210, 320, UI_MAIN);
-    drawStringCustom(10, 218, "OK: ACEPTAR   UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(10, 218, "OK: ACEPTAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2200, 60);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(1000, 80);
-            while (navUpPressed() || navDownPressed())
+            while (navBackPressed() || navUpPressed() || navDownPressed())
                 delay(5);
             delay(100);
             return false;
@@ -336,7 +336,7 @@ static void drawModeMenu(int cursor) {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:START   OK(HOLD):BACK", UI_ACCENT, 1);
+    drawStringCustom(10, 222, "OK:START   BACK/OK(H):BACK", UI_ACCENT, 1);
 }
 
 static int selectMode() {
@@ -346,6 +346,11 @@ static int selectMode() {
     drawModeMenu(cursor);
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor - 1 + totalItems) % totalItems;
             beep(2100, 20);
@@ -394,7 +399,7 @@ static void drawAttackFrame() {
     tft.drawRect(10, 170, 300, 16, UI_ACCENT);
 
     tft.drawFastHLine(0, 210, 320, UI_SELECT);
-    drawStringCustom(10, 220, "OK (HOLD): STOP", TFT_RED, 1);
+    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
 }
 
 static void drawAttackStats(unsigned long pkts, float rate) {
@@ -465,6 +470,12 @@ static void runAttackLoop() {
     bool okHeld = false;
 
     while (!stopAttack) {
+        if (navBackPressed()) {
+            stopAttack = true;
+            while (navBackPressed()) delay(5);
+            continue;
+        }
+
         // ── Enviar un beacon ──────────────────────────────────────────
         const char* ssid = getSSIDForMode(activeMode, ssidIdx);
         currentSSID = String(ssid);
@@ -517,7 +528,7 @@ static void runAttackLoop() {
     beep(1800, 40); delay(20);
     beep(1200, 60);
 
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(150);
 }
 
@@ -526,7 +537,7 @@ static void runAttackLoop() {
 // ═══════════════════════════════════════════════════════════════════════════
 void runBeaconSpam() {
     // Esperar liberación de OK
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     if (!showDisclaimer()) return;

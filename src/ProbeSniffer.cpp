@@ -456,7 +456,7 @@ static void runSnifferLoop() {
             } else if (millis() - okStart > 650) {
                 paused = !paused;
                 beep(paused ? 900 : 2400, 45);
-                while (navEnterPressed()) delay(5);
+                while (navEnterPressed() || navBackPressed()) delay(5);
                 okWasDown = false;
                 tft.startWrite();
                 drawHeader();

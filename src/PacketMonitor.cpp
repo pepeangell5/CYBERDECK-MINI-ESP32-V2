@@ -209,7 +209,7 @@ static void drawFrame() {
     tft.drawRect(HISTORY_X - 1, HISTORY_Y - 1, HISTORY_W + 2, HISTORY_H + 2, UI_ACCENT);
 
     drawStringCustom(8, 139, "HISTORY 60s", UI_ACCENT, 1);
-    drawStringCustom(8, 218, "UP/DN: CH   OK(HOLD): EXIT", UI_ACCENT, 1);
+    drawStringCustom(8, 218, "UP/DN: CH   BACK/OK(H): EXIT", UI_ACCENT, 1);
 }
 
 static void drawChannel() {
@@ -402,6 +402,13 @@ void runPacketMonitor() {
         }
 
         // ─── CONTROLES ────────────────────────────────────────────────
+        if (navBackPressed() || isBackPressed()) {
+            exitMonitor = true;
+            while (isBackPressed()) delay(5);
+            flushNavInput(60);
+            continue;
+        }
+
         if (navUpPressed()) {
             if (monitorChannel < 13) {
                 monitorChannel++;
@@ -421,8 +428,9 @@ void runPacketMonitor() {
             delay(180);
         }
         if (navEnterPressed()) {
-            delay(300);
-            if (navEnterPressed()) exitMonitor = true;
+            bool held = waitOkReleaseWasLong();
+            if (held) exitMonitor = true;
+            else flushNavInput(60);
         }
 
         delay(10);

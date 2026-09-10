@@ -57,9 +57,14 @@ enum ScanMode { MODE_SPECTRUM = 0, MODE_WATERFALL = 1, MODE_CHANNEL = 2 };
 static ScanMode currentMode = MODE_SPECTRUM;
 
 static RF24 radio1(NRF1_CE_PIN, NRF1_CSN_PIN, NRF_SPI_SPEED);
+#if NRF2_ENABLED
 static RF24 radio2(NRF2_CE_PIN, NRF2_CSN_PIN, NRF_SPI_SPEED);
 static RF24* scanRadios[] = { &radio1, &radio2 };
 static bool scanRadioOk[] = { false, false };
+#else
+static RF24* scanRadios[] = { &radio1 };
+static bool scanRadioOk[] = { false };
+#endif
 static const uint8_t scanRadioCount = sizeof(scanRadios) / sizeof(scanRadios[0]);
 
 // Buffers
@@ -410,13 +415,21 @@ static void configureScannerRadio(RF24& radio) {
 static void prepareScannerDisplay() {
     pinMode(TFT_CS_PIN, OUTPUT);
     pinMode(NRF1_CSN_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
+#endif
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     digitalWrite(TFT_CS_PIN, HIGH);
     delayMicroseconds(80);
 }
@@ -439,9 +452,13 @@ static void cleanupScanner(bool clearScreen) {
     }
 
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     digitalWrite(TFT_CS_PIN, HIGH);
 
     if (clearScreen) {
@@ -461,26 +478,39 @@ static bool initScannerRadios() {
     digitalWrite(TFT_CS_PIN, HIGH);
     pinMode(NRF1_CSN_PIN, OUTPUT);
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
     SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
 
     scanRadioOk[0] = radio1.begin();
     if (scanRadioOk[0]) configureScannerRadio(radio1);
 
+#if NRF2_ENABLED
     scanRadioOk[1] = radio2.begin();
     if (scanRadioOk[1]) configureScannerRadio(radio2);
+#endif
 
     Serial.printf("[RadioScanner] NRF1 CE:%d CSN:%d -> %s\n",
                   NRF1_CE_PIN, NRF1_CSN_PIN, scanRadioOk[0] ? "OK" : "FAIL");
+#if NRF2_ENABLED
     Serial.printf("[RadioScanner] NRF2 CE:%d CSN:%d -> %s\n",
                   NRF2_CE_PIN, NRF2_CSN_PIN, scanRadioOk[1] ? "OK" : "FAIL");
+#else
+    Serial.println("[RadioScanner] NRF2 disabled");
+#endif
 
-    return scanRadioOk[0] || scanRadioOk[1];
+    for (uint8_t r = 0; r < scanRadioCount; r++) {
+        if (scanRadioOk[r]) return true;
+    }
+    return false;
 }
 
 static void drawScannerErrorScreen() {
@@ -488,7 +518,11 @@ static void drawScannerErrorScreen() {
     tft.drawRect(0, 0, 320, 240, TFT_WHITE);
     drawStringBig(45, 90, "NRF24 ERROR", TFT_RED, 2);
     drawStringCustom(30, 130, "NRF1 CE:" + String(NRF1_CE_PIN) + " CSN:" + String(NRF1_CSN_PIN), UI_ACCENT, 1);
+#if NRF2_ENABLED
     drawStringCustom(30, 145, "NRF2 CE:" + String(NRF2_CE_PIN) + " CSN:" + String(NRF2_CSN_PIN), UI_ACCENT, 1);
+#else
+    drawStringCustom(30, 145, "NRF2 disabled - single module mode", UI_ACCENT, 1);
+#endif
     drawStringCustom(30, 160, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) + "/" + String(MOSI_PIN), UI_ACCENT, 1);
     drawStringCustom(30, 190, "OK/BACK: RETURN", UI_ACCENT, 1);
     while (!isEnterPressed() && !isBackPressed()) delay(10);

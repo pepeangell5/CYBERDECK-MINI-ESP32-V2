@@ -111,7 +111,7 @@ static bool tryAutoConnect() {
     String ssidDisp = truncateToWidth(ssid, 300, 1, FONT_BIG);
     drawStringBig(10, 70, ssidDisp, UI_SELECT, 1);
 
-    drawStringCustom(10, 100, "OK(HOLD): cancelar y elegir otra", UI_ACCENT, 1);
+    drawStringCustom(10, 100, "BACK/OK(H): cancelar y elegir otra", UI_ACCENT, 1);
 
     // Spinner
     int spinX = 160, spinY = 160;
@@ -161,6 +161,11 @@ static bool tryAutoConnect() {
         drawStringBig(spinX, spinY, String(frames[spinFrame]), UI_MAIN, 2);
         spinFrame = (spinFrame + 1) % 4;
 
+        if (navBackPressed()) {
+            userCanceled = true;
+            break;
+        }
+
         // OK hold para cancelar
         if (navEnterPressed()) {
             if (!okHeld) { okPressStart = millis(); okHeld = true; }
@@ -179,7 +184,7 @@ static bool tryAutoConnect() {
 
     if (userCanceled) {
         beep(1200, 80);
-        while (navEnterPressed()) delay(5);
+        while (navEnterPressed() || navBackPressed()) delay(5);
         delay(100);
         return false;   // user wants to pick another network
     }
@@ -193,13 +198,13 @@ static bool tryAutoConnect() {
     drawStringCustom(20, 160, "Posibles causas:", UI_ACCENT, 1);
     drawStringCustom(30, 174, "- Password cambio", UI_ACCENT, 1);
     drawStringCustom(30, 186, "- Red fuera de alcance", UI_ACCENT, 1);
-    drawStringCustom(20, 215, "OK: elegir otra red", UI_MAIN, 1);
+    drawStringCustom(20, 215, "OK/BACK: elegir otra red", UI_MAIN, 1);
 
     beep(800, 100); delay(50);
     beep(800, 100);
 
-    while (!navEnterPressed()) delay(20);
-    while (navEnterPressed()) delay(5);
+    while (!navEnterPressed() && !navBackPressed()) delay(20);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
     return false;
 }
@@ -343,11 +348,17 @@ static int selectNetwork() {
         }
 
         tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-        drawStringCustom(10, 222, "OK:SELECT  OK(HOLD):BACK", UI_ACCENT, 1);
+        drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):CANCEL", UI_ACCENT, 1);
     };
     draw();
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            delay(100);
+            return -2;
+        }
         if (navUpPressed()) {
             cursor = (cursor + total - 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
@@ -435,13 +446,13 @@ static bool connectWithCredentials(const String& ssid, const String& pass) {
     drawStringBig(40, 80, "FALLO", TFT_RED, 2);
     drawStringCustom(20, 130, "No se pudo conectar.", UI_MAIN, 1);
     drawStringCustom(20, 146, "Password incorrecto?", UI_ACCENT, 1);
-    drawStringCustom(20, 220, "OK: Reintentar", UI_MAIN, 1);
+    drawStringCustom(20, 220, "OK/BACK: Reintentar", UI_MAIN, 1);
 
     beep(800, 100); delay(50);
     beep(800, 100);
 
-    while (!navEnterPressed()) delay(20);
-    while (navEnterPressed()) delay(5);
+    while (!navEnterPressed() && !navBackPressed()) delay(20);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
     return false;
 }
@@ -470,18 +481,18 @@ bool wifiConfigConnect() {
             drawStringBig(20, 80, "NO HAY REDES", TFT_RED, 1);
             drawStringCustom(20, 130, "No se encontraron redes WiFi.",
                              UI_ACCENT, 1);
-            drawStringCustom(20, 220, "OK: reintentar  UP/DN: cancelar",
+            drawStringCustom(20, 220, "OK: reintentar  BACK/UP/DN: cancelar",
                              UI_MAIN, 1);
             while (true) {
                 if (navEnterPressed()) {
                     beep(2000, 40);
-                    while (navEnterPressed()) delay(5);
+                    while (navEnterPressed() || navBackPressed()) delay(5);
                     delay(100);
                     break;
                 }
-                if (navUpPressed() || navDownPressed()) {
+                if (navBackPressed() || navUpPressed() || navDownPressed()) {
                     beep(1000, 80);
-                    while (navUpPressed() ||
+                    while (navBackPressed() || navUpPressed() ||
                            navDownPressed()) delay(5);
                     return false;
                 }

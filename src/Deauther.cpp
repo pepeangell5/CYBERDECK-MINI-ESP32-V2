@@ -138,18 +138,18 @@ static bool showDisclaimer() {
     drawStringCustom(10, y, "Violacion = delito federal.",    TFT_RED, 1);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: ENTIENDO   UP/DN: SALIR",  UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: ENTIENDO   BACK/UP/DN: SALIR",  UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2200, 60);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(800, 100);
-            while (navUpPressed() || navDownPressed())
+            while (navBackPressed() || navUpPressed() || navDownPressed())
                 delay(5);
             delay(100);
             return false;
@@ -320,7 +320,7 @@ static void drawAPList(int cursor, int scrollOffset) {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:SELECT  OK(HOLD):BACK", UI_ACCENT, 1);
+    drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
 }
 
 // Devuelve:
@@ -333,6 +333,11 @@ static int selectAP() {
     drawAPList(cursor, scrollOffset);
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -3;
+        }
         if (navUpPressed()) {
             cursor = (cursor - 1 + totalItems) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
@@ -391,18 +396,18 @@ static bool confirmRambo() {
     drawStringCustom(10, y, "Responsabilidad 100% tuya.",      TFT_YELLOW, 1);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: CONTINUAR   UP/DN: CANCEL", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: CONTINUAR   BACK/UP/DN: CANCEL", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2200, 60);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(800, 100);
-            while (navUpPressed() || navDownPressed())
+            while (navBackPressed() || navUpPressed() || navDownPressed())
                 delay(5);
             delay(100);
             return false;
@@ -456,7 +461,7 @@ static void drawActionMenu(int cursor, const APInfo& ap) {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:SELECT  OK(HOLD):BACK", UI_ACCENT, 1);
+    drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
 }
 
 // Devuelve: 0=broadcast, 1=scan clients, -1=back
@@ -465,6 +470,11 @@ static int selectAction(const APInfo& ap) {
     drawActionMenu(cursor, ap);
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -1;
+        }
         if (navUpPressed()) {
             cursor = (cursor - 1 + 2) % 2;
             beep(2100, 20);
@@ -691,7 +701,7 @@ static void drawClientList(int cursor, int scrollOffset) {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:DEAUTH  OK(HOLD):BACK", UI_ACCENT, 1);
+    drawStringCustom(10, 222, "OK:DEAUTH  BACK/OK(H):BACK", UI_ACCENT, 1);
 }
 
 // Devuelve: -3=BACK, -2=RESCAN, -1=ALL, 0..clientCount-1 = client
@@ -703,6 +713,11 @@ static int selectTarget() {
     drawClientList(cursor, scrollOffset);
 
     while (true) {
+        if (navBackPressed()) {
+            beep(1000, 40);
+            while (navBackPressed()) delay(5);
+            return -3;
+        }
         if (navUpPressed()) {
             cursor = (cursor - 1 + totalItems) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
@@ -774,7 +789,7 @@ static void drawAttackFrame() {
     tft.drawRect(10, 185, 300, 14, UI_ACCENT);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK (HOLD): STOP", TFT_RED, 1);
+    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
 }
 
 static void drawAttackStats(unsigned long elapsed, unsigned long pkts,
@@ -839,6 +854,12 @@ static void runAttackLoop() {
     bool okHeld = false;
 
     while (!stopAttack) {
+        if (navBackPressed()) {
+            stopAttack = true;
+            while (navBackPressed()) delay(5);
+            continue;
+        }
+
         // ── Enviar deauth(s) ───────────────────────────────────────────
         if (ramboMode) {
             // Atacar a cada AP que coincida con el canal actual
@@ -907,7 +928,7 @@ static void runAttackLoop() {
     beep(1800, 40); delay(20);
     beep(1200, 60);
 
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(150);
 }
 
@@ -916,7 +937,7 @@ static void runAttackLoop() {
 // ═══════════════════════════════════════════════════════════════════════════
 void runDeauther() {
     // Esperar liberación de OK
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     // 1. Disclaimer principal
@@ -932,18 +953,18 @@ void runDeauther() {
             tft.drawRect(0, 0, 320, 240, UI_MAIN);
             drawStringBig(35, 90, "NO APs FOUND", TFT_RED, 1);
             drawStringCustom(30, 130, "No WiFi networks detected.", UI_MAIN, 1);
-            drawStringCustom(30, 175, "OK: rescan  |  UP/DN: exit",
+            drawStringCustom(30, 175, "OK: rescan  BACK/UP/DN: exit",
                              UI_ACCENT, 1);
 
             while (true) {
                 if (navEnterPressed()) {
                     beep(2000, 40);
-                    while (navEnterPressed()) delay(5);
+                    while (navEnterPressed() || navBackPressed()) delay(5);
                     break;
                 }
-                if (navUpPressed() || navDownPressed()) {
+                if (navBackPressed() || navUpPressed() || navDownPressed()) {
                     beep(1000, 60);
-                    while (navUpPressed() ||
+                    while (navBackPressed() || navUpPressed() ||
                            navDownPressed()) delay(5);
                     return;
                 }
@@ -996,10 +1017,10 @@ void runDeauther() {
                              UI_MAIN, 1);
             drawStringCustom(30, 145, "You can still broadcast.",
                              UI_ACCENT, 1);
-            drawStringCustom(30, 175, "OK: continue", UI_ACCENT, 1);
+            drawStringCustom(30, 175, "OK/BACK: continue", UI_ACCENT, 1);
 
-            while (!navEnterPressed()) delay(20);
-            while (navEnterPressed()) delay(5);
+            while (!navEnterPressed() && !navBackPressed()) delay(20);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             continue;
         }
 

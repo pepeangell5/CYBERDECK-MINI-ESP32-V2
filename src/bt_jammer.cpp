@@ -1,5 +1,6 @@
 #include "bt_jammer.h"
 
+#include <esp_system.h>
 #include <RF24.h>
 #include <SPI.h>
 
@@ -10,14 +11,31 @@
 
 extern DisplayTFT tft;
 
-static RF24 btJam1(NRF1_CE_PIN, NRF1_CSN_PIN, NRF_SPI_SPEED);
-static RF24 btJam2(NRF2_CE_PIN, NRF2_CSN_PIN, NRF_SPI_SPEED);
+#ifndef BT_JAMMER_DUAL_NRF
+#define BT_JAMMER_DUAL_NRF 1
+#endif
+
+#ifndef BT_JAMMER_SPI_SPEED
+#define BT_JAMMER_SPI_SPEED 8000000
+#endif
+
+#if NRF2_ENABLED && BT_JAMMER_DUAL_NRF
+#define BT_JAMMER_RADIO_COUNT 2
+#else
+#define BT_JAMMER_RADIO_COUNT 1
+#endif
+
+static RF24 btJam1(NRF1_CE_PIN, NRF1_CSN_PIN, BT_JAMMER_SPI_SPEED);
+static RF24 btJam2(NRF2_CE_PIN, NRF2_CSN_PIN, BT_JAMMER_SPI_SPEED);
 static bool btJam1Ok = false;
 static bool btJam2Ok = false;
 static bool isBtJamming = false;
 static bool exitRequested = false;
 static uint8_t btFrame = 0;
 static bool backlightPwmActive = false;
+static uint8_t btSweepIndex = 0;
+static uint8_t btCh1 = 2;
+static uint8_t btCh2 = 41;
 
 static constexpr int BT_BL_LEDC_CHANNEL = 7;
 static constexpr int BT_BL_LEDC_FREQ = 5000;
@@ -26,23 +44,25 @@ static constexpr uint8_t BT_BL_MIN_DUTY = 165;
 static constexpr uint8_t BT_BL_MAX_DUTY = 255;
 static constexpr unsigned long BT_BL_PULSE_MS = 1300;
 
-static const uint8_t hoppingChannels[] = {
-    2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
-    22, 24, 26, 28, 30, 32, 34, 36, 38, 40,
-    42, 44, 46, 48, 50, 52, 54, 56, 58, 60,
-    62, 64, 66, 68, 70, 72, 74, 76, 78, 80
-};
-static const int totalBtChans =
-    sizeof(hoppingChannels) / sizeof(hoppingChannels[0]);
+static constexpr uint8_t BT_MIN_RF_CHANNEL = 2;
+static constexpr uint8_t BT_MAX_RF_CHANNEL = 80;
+static constexpr uint8_t BT_RF_CHANNEL_COUNT =
+    BT_MAX_RF_CHANNEL - BT_MIN_RF_CHANNEL + 1;
+static constexpr uint8_t BT_SWEEP_STEP = 37;
+static constexpr uint8_t BT_RADIO_OFFSET = 39;
+static constexpr uint16_t BT_MIN_DWELL_US = 130;
+static constexpr uint16_t BT_MAX_DWELL_US = 170;
 
 static void configureBtRadio(RF24& radio) {
     radio.powerUp();
     radio.setAutoAck(false);
-    radio.setPALevel(RF24_PA_MAX, true);
-    radio.setDataRate(RF24_1MBPS);
-    radio.setCRCLength(RF24_CRC_DISABLED);
-    radio.setRetries(0, 0);
     radio.stopListening();
+    radio.setRetries(0, 0);
+    radio.setPayloadSize(32);
+    radio.setAddressWidth(5);
+    radio.setPALevel(RF24_PA_MAX, true);
+    radio.setDataRate(RF24_2MBPS);
+    radio.setCRCLength(RF24_CRC_DISABLED);
 }
 
 static int activeBtRadioCount() {
@@ -51,19 +71,45 @@ static int activeBtRadioCount() {
 
 static void drawBtScreen();
 
+static void resetBtSweep() {
+    btSweepIndex = 0;
+    btCh1 = BT_MIN_RF_CHANNEL;
+    btCh2 = BT_MIN_RF_CHANNEL + BT_RADIO_OFFSET;
+}
+
+static void advanceBtSweep() {
+    btSweepIndex = (btSweepIndex + BT_SWEEP_STEP) % BT_RF_CHANNEL_COUNT;
+    btCh1 = BT_MIN_RF_CHANNEL + btSweepIndex;
+    btCh2 = BT_MIN_RF_CHANNEL +
+        ((btSweepIndex + BT_RADIO_OFFSET) % BT_RF_CHANNEL_COUNT);
+
+    if (btJam1Ok) btJam1.setChannel(btCh1);
+    if (btJam2Ok) btJam2.setChannel(btCh2);
+
+    delayMicroseconds(random(BT_MIN_DWELL_US, BT_MAX_DWELL_US + 1));
+}
+
 static void prepareBtDisplay() {
     pinMode(TFT_CS_PIN, OUTPUT);
     pinMode(NRF1_CSN_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
+#endif
 
     if (!isBtJamming) {
         digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
         digitalWrite(NRF2_CE_PIN, LOW);
+#endif
     }
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     digitalWrite(TFT_CS_PIN, HIGH);
     delayMicroseconds(80);
 }
@@ -113,6 +159,7 @@ static void restoreBacklight() {
 
 static void startBtJammer() {
     isBtJamming = true;
+    resetBtSweep();
 
     // Draw before enabling carriers so the TFT does not steal SPI time mid-attack.
     drawBtScreen();
@@ -120,12 +167,13 @@ static void startBtJammer() {
 
     if (btJam1Ok) {
         configureBtRadio(btJam1);
-        btJam1.startConstCarrier(RF24_PA_MAX, hoppingChannels[0]);
+        btJam1.startConstCarrier(RF24_PA_MAX, btCh1);
     }
     if (btJam2Ok) {
         configureBtRadio(btJam2);
-        btJam2.startConstCarrier(RF24_PA_MAX, hoppingChannels[totalBtChans - 1]);
+        btJam2.startConstCarrier(RF24_PA_MAX, btCh2);
     }
+    delay(400);
 }
 
 static void stopBtJammer() {
@@ -164,8 +212,12 @@ static void drawBtScreen() {
     drawStringBig(112, 64, isBtJamming ? "MODO MAX" : "ESPECTRO", TFT_WHITE, 1);
     drawStringCustom(114, 88, isBtJamming ? "HOPPING 2.4GHz" : "BT LISTO",
                      isBtJamming ? TFT_RED : TFT_GREEN, 2);
-    drawStringCustom(114, 116, "RADIOS: " + String(activeBtRadioCount()) + "/2",
+    drawStringCustom(114, 116, "RADIOS: " + String(activeBtRadioCount()) + "/" + String(BT_JAMMER_RADIO_COUNT),
                      activeBtRadioCount() > 0 ? TFT_GREEN : TFT_RED, 1);
+    if (isBtJamming) {
+        drawStringCustom(114, 132, "CH: " + String(btCh1) + "/" + String(btCh2),
+                         TFT_CYAN, 1);
+    }
 
     if (isBtJamming) {
         tft.fillRect(18, 140, 284, 58, TFT_BLACK);
@@ -181,34 +233,58 @@ static void drawBtScreen() {
 
     tft.drawFastHLine(0, 214, 320, TFT_WHITE);
     drawStringCustom(8, 222, "OK: TOGGLE", TFT_WHITE, 1);
-    drawStringRight(312, 222, "OK(HOLD): BACK", TFT_WHITE, 1);
+    drawStringRight(312, 222, "BACK/OK(H): BACK", TFT_WHITE, 1);
 }
 
 void btJammerSetup() {
+    randomSeed(esp_random());
+
     pinMode(TFT_CS_PIN, OUTPUT);
     digitalWrite(TFT_CS_PIN, HIGH);
     pinMode(NRF1_CSN_PIN, OUTPUT);
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
 
     SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
-    delay(20);
+    delay(100);
 
-    btJam1Ok = btJam1.begin();
+    btJam1.begin();
+
+#if NRF2_ENABLED && BT_JAMMER_DUAL_NRF
+    btJam2.begin();
+#else
+    btJam2Ok = false;
+#endif
+
+    delay(500);
+
+    bool btJam1BeginOk = btJam1.begin();
+    btJam1Ok = btJam1BeginOk && btJam1.isChipConnected();
     if (btJam1Ok) configureBtRadio(btJam1);
 
-    btJam2Ok = btJam2.begin();
+#if NRF2_ENABLED && BT_JAMMER_DUAL_NRF
+    bool btJam2BeginOk = btJam2.begin();
+    btJam2Ok = btJam2BeginOk && btJam2.isChipConnected();
     if (btJam2Ok) configureBtRadio(btJam2);
+#endif
 
     Serial.printf("[bt_jammer] NRF1 CE:%d CSN:%d -> %s\n",
                   NRF1_CE_PIN, NRF1_CSN_PIN, btJam1Ok ? "OK" : "FAIL");
+#if NRF2_ENABLED && BT_JAMMER_DUAL_NRF
     Serial.printf("[bt_jammer] NRF2 CE:%d CSN:%d -> %s\n",
                   NRF2_CE_PIN, NRF2_CSN_PIN, btJam2Ok ? "OK" : "FAIL");
+#else
+    Serial.println("[bt_jammer] NRF2 disabled for stable BT mode");
+#endif
 
     prepareBtDisplay();
 }
@@ -242,10 +318,9 @@ void btJammerLoop() {
     }
 
     if (isBtJamming) {
-        for (int i = 0; i < totalBtChans; i++) {
+        for (uint8_t i = 0; i < BT_RF_CHANNEL_COUNT; i++) {
             if (!isBtJamming) break;
-            if (btJam1Ok) btJam1.setChannel(hoppingChannels[i]);
-            if (btJam2Ok) btJam2.setChannel(hoppingChannels[totalBtChans - 1 - i]);
+            advanceBtSweep();
 
             if (isEnterPressed() || isBackPressed()) {
                 stopBtJammer();

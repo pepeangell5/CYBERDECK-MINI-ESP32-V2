@@ -433,7 +433,7 @@ static void drawMainScreenFrame() {
 
     // Footer
     tft.drawFastHLine(0, 220, 320, UI_ACCENT);
-    drawStringCustom(10, 226, "OK(HOLD): EXIT", UI_ACCENT, 1);
+    drawStringCustom(10, 226, "BACK / OK(HOLD): EXIT", UI_ACCENT, 1);
 }
 
 static void drawClock(struct tm* t) {
@@ -534,6 +534,13 @@ static void mainLoop() {
     bool okHeld = false;
 
     while (!stop) {
+        if (navBackPressed() || isBackPressed()) {
+            stop = true;
+            while (isBackPressed()) delay(5);
+            flushNavInput(60);
+            continue;
+        }
+
         // Update clock cada segundo
         if (millis() - g_lastSecondTick >= 1000) {
             if (getLocalTime(&timeinfo)) {
@@ -578,7 +585,7 @@ static void mainLoop() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void runClockWeather() {
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     // 1. Conectar WiFi (módulo reusable)
@@ -610,10 +617,10 @@ void runClockWeather() {
         drawStringBig(50, 90, "NTP FALLO", TFT_RED, 2);
         drawStringCustom(40, 130, "No se pudo sincronizar la hora.",
                          UI_MAIN, 1);
-        drawStringCustom(40, 220, "OK: salir", UI_MAIN, 1);
+        drawStringCustom(40, 220, "OK/BACK: salir", UI_MAIN, 1);
         beep(800, 100);
-        while (!navEnterPressed()) delay(20);
-        while (navEnterPressed()) delay(5);
+        while (!navEnterPressed() && !navBackPressed()) delay(20);
+        while (navEnterPressed() || navBackPressed()) delay(5);
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
         return;
@@ -648,6 +655,6 @@ void runClockWeather() {
     beep(1800, 40); delay(20);
     beep(1200, 60);
 
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(150);
 }

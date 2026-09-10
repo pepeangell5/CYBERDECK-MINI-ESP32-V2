@@ -249,10 +249,11 @@ static void showDetails(const NetInfo& net) {
 
     // Footer
     tft.drawFastHLine(0, 215, 320, TFT_WHITE);
-    drawStringCustom(10, 222, "PRESS OK TO RETURN", TFT_WHITE, 2);
+    drawStringCustom(10, 222, "OK/BACK TO RETURN", TFT_WHITE, 2);
 
     delay(400);
-    while (!navEnterPressed());
+    while (!navEnterPressed() && !navBackPressed()) delay(10);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(200);
     ledcWriteTone(0, 0);
 }
@@ -322,7 +323,7 @@ static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
     }
 
     tft.drawFastHLine(0, 218, 320, UI_ACCENT);
-    drawStringCustom(8, 225, "OK:DETAILS  OK(HOLD):BACK", UI_ACCENT, 1);
+    drawStringCustom(8, 225, "OK:DETAILS  BACK/OK(H):EXIT", UI_ACCENT, 1);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -385,6 +386,13 @@ void runWifiScan() {
     bool needsRedraw = true;
 
     while (!exitScan) {
+
+        if (navBackPressed() || isBackPressed()) {
+            exitScan = true;
+            while (isBackPressed()) delay(5);
+            flushNavInput(60);
+            continue;
+        }
 
         if (needsRedraw) {
             drawList(networks, n, cursor, scrollOffset);

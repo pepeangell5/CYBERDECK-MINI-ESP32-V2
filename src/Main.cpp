@@ -44,12 +44,16 @@ void setup() {
     digitalWrite(TFT_CS_PIN, HIGH);
     pinMode(NRF1_CSN_PIN, OUTPUT);
     digitalWrite(NRF1_CSN_PIN, HIGH);
+#if NRF2_ENABLED
     pinMode(NRF2_CSN_PIN, OUTPUT);
     digitalWrite(NRF2_CSN_PIN, HIGH);
+#endif
     pinMode(NRF1_CE_PIN, OUTPUT);
     digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
     pinMode(NRF2_CE_PIN, OUTPUT);
     digitalWrite(NRF2_CE_PIN, LOW);
+#endif
 
 #if TFT_LED_PIN >= 0
     pinMode(TFT_LED_PIN, OUTPUT);

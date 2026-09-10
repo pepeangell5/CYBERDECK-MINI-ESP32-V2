@@ -150,18 +150,18 @@ static bool showDisclaimer() {
     drawStringCustom(10, y, "delito federal (Art. 211 bis).",  TFT_RED, 1);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: ENTIENDO   UP/DN: SALIR", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: ENTIENDO   BACK/UP/DN: SALIR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2200, 60);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return true;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(800, 100);
-            while (navUpPressed() || navDownPressed()) delay(5);
+            while (navBackPressed() || navUpPressed() || navDownPressed()) delay(5);
             delay(100);
             return false;
         }
@@ -338,7 +338,7 @@ static void drawAttackFrame() {
     drawStringCustom(10, 175, "SSID transmitiendo:", UI_ACCENT, 1);
 
     tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK(HOLD): STOP", TFT_RED, 1);
+    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
 }
 
 static void drawAttackStats() {
@@ -407,6 +407,12 @@ static void runAttackLoop() {
     bool okHeld = false;
 
     while (!stopAttack) {
+        if (navBackPressed()) {
+            stopAttack = true;
+            while (navBackPressed()) delay(5);
+            continue;
+        }
+
         // Channel hop
         if (millis() - lastHop > HOP_INTERVAL_MS) {
             hopIdx = (hopIdx + 1) % 3;
@@ -458,7 +464,7 @@ static void runAttackLoop() {
     beep(1800, 40); delay(20);
     beep(1200, 60);
 
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(150);
 }
 
@@ -468,7 +474,7 @@ static void runAttackLoop() {
 
 void runKarma() {
     // Esperar liberación de OK
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     // Reset
@@ -491,11 +497,11 @@ void runKarma() {
         drawStringCustom(30, 148, "- No hay celulares cerca", UI_ACCENT, 1);
         drawStringCustom(30, 160, "- Estan conectados a redes", UI_ACCENT, 1);
         drawStringCustom(30, 172, "- iPhones modernos no probean", UI_ACCENT, 1);
-        drawStringCustom(20, 220, "OK: Volver", UI_MAIN, 1);
+        drawStringCustom(20, 220, "OK/BACK: Volver", UI_MAIN, 1);
 
-        while (!navEnterPressed()) delay(20);
+        while (!navEnterPressed() && !navBackPressed()) delay(20);
         beep(1500, 60);
-        while (navEnterPressed()) delay(5);
+        while (navEnterPressed() || navBackPressed()) delay(5);
         return;
     }
 
@@ -520,18 +526,18 @@ void runKarma() {
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 220, "OK: ATACAR    UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(10, 220, "OK: ATACAR    BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
 
     while (true) {
         if (navEnterPressed()) {
             beep(2400, 50);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             break;
         }
-        if (navUpPressed() || navDownPressed()) {
+        if (navBackPressed() || navUpPressed() || navDownPressed()) {
             beep(1000, 60);
-            while (navUpPressed() ||
+            while (navBackPressed() || navUpPressed() ||
                    navDownPressed()) delay(5);
             return;
         }

@@ -1,4 +1,7 @@
 #include "MenuSystem.h"
+
+#include <string.h>
+
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "Input.h"
@@ -9,6 +12,7 @@
 #include "WifiAudit.h"
 #include "RadioScanner.h"
 #include "RadioJammer.h"
+#include "NRFDiagnostics.h"
 #include "PacketMonitor.h"
 #include "SettingsMenu.h"
 #include "SystemInfo.h"
@@ -60,6 +64,37 @@ static const MainMenuEntry MAIN_ENTRIES[] = {
 
 static const int MAIN_COUNT = sizeof(MAIN_ENTRIES) / sizeof(MainMenuEntry);
 static int currentEntry = 0;
+
+static constexpr int SUBMENU_STATE_SLOTS = 16;
+
+struct SubMenuState {
+    const char* title;
+    int cursor;
+    int scrollOffset;
+};
+
+static SubMenuState subMenuStates[SUBMENU_STATE_SLOTS] = {};
+static int nextSubMenuStateSlot = 0;
+
+static SubMenuState* stateForSubMenu(const char* title) {
+    for (int i = 0; i < SUBMENU_STATE_SLOTS; i++) {
+        if (subMenuStates[i].title && strcmp(subMenuStates[i].title, title) == 0) {
+            return &subMenuStates[i];
+        }
+    }
+
+    for (int i = 0; i < SUBMENU_STATE_SLOTS; i++) {
+        if (!subMenuStates[i].title) {
+            subMenuStates[i] = { title, 0, 0 };
+            return &subMenuStates[i];
+        }
+    }
+
+    SubMenuState* state = &subMenuStates[nextSubMenuStateSlot];
+    nextSubMenuStateSlot = (nextSubMenuStateSlot + 1) % SUBMENU_STATE_SLOTS;
+    *state = { title, 0, 0 };
+    return state;
+}
 
 static void drawBitmapCentered(int y, const String& text, uint16_t color,
                                int size, FontType font) {
@@ -389,7 +424,8 @@ static void handlerRadio() {
     static const char* radioItems[] = {
         "Jammer",
         "Spectrum",
-        "RF Baseline"
+        "RF Baseline",
+        "NRF Diagnostic"
     };
 
     bool exitSub = false;
@@ -401,6 +437,7 @@ static void handlerRadio() {
             case  0: runRadioJammer();     break;
             case  1: runRadioScanner();    break;
             case  2: runRfBaseline();      break;
+            case  3: runNRFDiagnostics();  break;
         }
     }
 }
@@ -439,6 +476,7 @@ static void handlerSystem() {
         "Audit Reports",
         "Settings",
         "System Info",
+        "NRF Diagnostic",
         "GPS Tools",
         "MicroSD Manager",
         "MicroSD Info",
@@ -457,12 +495,13 @@ static void handlerSystem() {
             case  1: runAuditReports();   break;
             case  2: runSettings();       break;
             case  3: runSystemInfo();     break;
-            case  4: runGpsTools();       break;
-            case  5: runSdFileBrowser();  break;
-            case  6: runSdStatus();       break;
-            case  7: runBatteryStatus();  break;
-            case  8: runClockWeather();   break;
-            case  9: runAbout();          break;
+            case  4: runNRFDiagnostics(); break;
+            case  5: runGpsTools();       break;
+            case  6: runSdFileBrowser();  break;
+            case  7: runSdStatus();       break;
+            case  8: runBatteryStatus();  break;
+            case  9: runClockWeather();   break;
+            case 10: runAbout();          break;
         }
     }
 }
@@ -499,7 +538,7 @@ void runMainMenu() {
 
             beep(1800, 40);
             delay(80);
-            while (isEnterPressed()) delay(5);
+            while (isEnterPressed() || isBackPressed()) delay(5);
 
             MAIN_ENTRIES[currentEntry].handler();
 
@@ -524,11 +563,28 @@ int runSubMenu(const char* title, const char* items[], int count) {
     const int LINE_H = 30;
     const int LIST_Y = 50;
 
+    if (count <= 0) return -1;
+
     int totalItems = count;
-    int cursor = 0;
-    int scrollOffset = 0;
+    SubMenuState* state = stateForSubMenu(title);
+    int cursor = state->cursor;
+    int scrollOffset = state->scrollOffset;
     int result = -2;
     unsigned long lastPress = 0;
+
+    if (cursor < 0) cursor = 0;
+    if (cursor >= totalItems) cursor = totalItems - 1;
+
+    int maxScroll = totalItems > VISIBLE ? totalItems - VISIBLE : 0;
+    if (scrollOffset < 0) scrollOffset = 0;
+    if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+    if (cursor < scrollOffset) scrollOffset = cursor;
+    if (cursor >= scrollOffset + VISIBLE) scrollOffset = cursor - VISIBLE + 1;
+
+    auto rememberPosition = [&]() {
+        state->cursor = cursor;
+        state->scrollOffset = scrollOffset;
+    };
 
     auto drawHeaderFooter = [&]() {
         drawFrame();
@@ -587,6 +643,7 @@ int runSubMenu(const char* title, const char* items[], int count) {
             cursor = (cursor - 1 + totalItems) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE) scrollOffset = cursor - VISIBLE + 1;
+            rememberPosition();
 
             beep(2200, 15);
             tft.startWrite();
@@ -599,6 +656,7 @@ int runSubMenu(const char* title, const char* items[], int count) {
             cursor = (cursor + 1) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE) scrollOffset = cursor - VISIBLE + 1;
+            rememberPosition();
 
             beep(2200, 15);
             tft.startWrite();
@@ -608,6 +666,7 @@ int runSubMenu(const char* title, const char* items[], int count) {
         }
 
         if (action == NAV_BACK) {
+            rememberPosition();
             beep(1000, 40);
             result = -1;
             lastPress = millis();
@@ -615,6 +674,7 @@ int runSubMenu(const char* title, const char* items[], int count) {
 
         if (action == NAV_ENTER && (millis() - lastPress > 180)) {
             bool held = waitOkReleaseWasLong();
+            rememberPosition();
             beep(held ? 1000 : 1500, 40);
             result = held ? -1 : cursor;
             lastPress = millis();
@@ -626,5 +686,6 @@ int runSubMenu(const char* title, const char* items[], int count) {
     while (isEnterPressed() || isBackPressed()) delay(5);
     delay(60);
 
+    rememberPosition();
     return result;
 }

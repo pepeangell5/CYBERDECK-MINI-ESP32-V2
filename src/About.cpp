@@ -198,13 +198,13 @@ static void drawFooter() {
 
     if (g_maxScroll > 0) {
         if (g_scrollY == 0) {
-            drawStringCustom(10, 226, "DOWN: VER MAS  OK: VOLVER",
+            drawStringCustom(10, 226, "DOWN: VER MAS  BACK/OK: VOLVER",
                              UI_ACCENT, 1);
         } else if (g_scrollY >= g_maxScroll) {
-            drawStringCustom(10, 226, "UP: SUBIR  OK: VOLVER",
+            drawStringCustom(10, 226, "UP: SUBIR  BACK/OK: VOLVER",
                              UI_ACCENT, 1);
         } else {
-            drawStringCustom(10, 226, "UP/DN: SCROLL  OK: VOLVER",
+            drawStringCustom(10, 226, "UP/DN: SCROLL  BACK/OK: VOLVER",
                              UI_ACCENT, 1);
         }
 
@@ -224,7 +224,7 @@ static void drawFooter() {
         tft.drawFastVLine(312, trackTop, trackH, UI_ACCENT);
         tft.fillRect(310, barY, 5, barH, UI_SELECT);
     } else {
-        drawStringCustom(110, 226, "OK: VOLVER", UI_ACCENT, 1);
+        drawStringCustom(96, 226, "OK/BACK: VOLVER", UI_ACCENT, 1);
     }
 }
 
@@ -243,7 +243,7 @@ static void redrawAll() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void runAbout() {
-    while (navEnterPressed()) delay(5);
+    while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
     g_scrollY = 0;
@@ -259,10 +259,10 @@ void runAbout() {
     unsigned long lastBtn = 0;
 
     while (true) {
-        if (navEnterPressed() && millis() - lastBtn > 200) {
+        if ((navEnterPressed() || navBackPressed()) && millis() - lastBtn > 200) {
             beep(1800, 50); delay(30);
             beep(1200, 80);
-            while (navEnterPressed()) delay(5);
+            while (navEnterPressed() || navBackPressed()) delay(5);
             delay(100);
             return;
         }
