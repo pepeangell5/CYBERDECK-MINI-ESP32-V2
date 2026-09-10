@@ -345,7 +345,7 @@ static int selectAP() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawAPList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % totalItems;
@@ -354,7 +354,7 @@ static int selectAP() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawAPList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -420,21 +420,7 @@ static bool confirmRambo() {
 //  MENÚ DE ACCIÓN (después de seleccionar AP)
 //  Broadcast now | Scan clients | Back
 // ═══════════════════════════════════════════════════════════════════════════
-static void drawActionMenu(int cursor, const APInfo& ap) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "ACTION", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    // AP info
-    drawStringFit(10, 38, "AP: " + ap.ssid, UI_SELECT, 300, 1);
-    drawStringCustom(10, 50, "BSSID: " + ap.bssidStr, UI_ACCENT, 1);
-    drawStringCustom(10, 62, "Channel: " + String(ap.channel) + "  RSSI: " +
-                     String(ap.rssi) + "dBm", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 75, 320, UI_ACCENT);
-
-    // 3 opciones
+static void drawActionMenuRow(int idx, bool selected) {
     const char* items[] = {
         "Broadcast Deauth NOW",
         "Scan Clients (15s)"
@@ -445,20 +431,32 @@ static void drawActionMenu(int cursor, const APInfo& ap) {
         ""
     };
 
-    for (int i = 0; i < 2; i++) {
-        int y = 85 + i * 32;
-        bool selected = (i == cursor);
+    int y = 85 + idx * 32;
+    uint16_t bg = selected ? UI_SELECT : UI_BG;
+    uint16_t colMain = selected ? UI_BG : UI_MAIN;
+    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
 
-        if (selected) tft.fillRect(5, y - 2, 310, 28, UI_SELECT);
-
-        uint16_t colMain = selected ? UI_BG : UI_MAIN;
-        uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
-
-        drawStringCustom(15, y + 2,  items[i], colMain, 2);
-        if (strlen(descs[i]) > 0) {
-            drawStringCustom(15, y + 18, descs[i], colSub, 1);
-        }
+    tft.fillRect(5, y - 2, 310, 28, bg);
+    drawStringCustom(15, y + 2,  items[idx], colMain, 2);
+    if (strlen(descs[idx]) > 0) {
+        drawStringCustom(15, y + 18, descs[idx], colSub, 1);
     }
+}
+
+static void drawActionMenu(int cursor, const APInfo& ap) {
+    tft.fillScreen(TFT_BLACK);
+    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+
+    drawStringBig(10, 8, "ACTION", UI_MAIN, 1);
+    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+
+    drawStringFit(10, 38, "AP: " + ap.ssid, UI_SELECT, 300, 1);
+    drawStringCustom(10, 50, "BSSID: " + ap.bssidStr, UI_ACCENT, 1);
+    drawStringCustom(10, 62, "Channel: " + String(ap.channel) + "  RSSI: " +
+                     String(ap.rssi) + "dBm", UI_ACCENT, 1);
+    tft.drawFastHLine(0, 75, 320, UI_ACCENT);
+
+    for (int i = 0; i < 2; i++) drawActionMenuRow(i, i == cursor);
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
     drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
@@ -476,16 +474,24 @@ static int selectAction(const APInfo& ap) {
             return -1;
         }
         if (navUpPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor - 1 + 2) % 2;
             beep(2100, 20);
-            drawActionMenu(cursor, ap);
-            delay(180);
+            tft.startWrite();
+            drawActionMenuRow(oldCursor, false);
+            drawActionMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navDownPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor + 1) % 2;
             beep(2100, 20);
-            drawActionMenu(cursor, ap);
-            delay(180);
+            tft.startWrite();
+            drawActionMenuRow(oldCursor, false);
+            drawActionMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -725,7 +731,7 @@ static int selectTarget() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawClientList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % totalItems;
@@ -734,7 +740,7 @@ static int selectTarget() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawClientList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();

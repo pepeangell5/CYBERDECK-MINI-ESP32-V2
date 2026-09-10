@@ -4,6 +4,7 @@
 #include "Input.h"
 #include "PeripheralTools.h"
 #include "SoundUtils.h"
+#include "SharedSpi.h"
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  CONFIGURACIÓN
@@ -406,32 +407,18 @@ static void geigerAmbient(int intensity) {
 static void configureScannerRadio(RF24& radio) {
     radio.powerUp();
     radio.setAutoAck(false);
-    radio.setPALevel(RF24_PA_MAX);
+    radio.setRetries(0, 0);
+    radio.setPayloadSize(32);
+    radio.setAddressWidth(5);
+    radio.setPALevel(RF24_PA_MAX, true);
     radio.setDataRate(RF24_1MBPS);
+    radio.setCRCLength(RF24_CRC_DISABLED);
     radio.startListening();
     radio.stopListening();
 }
 
 static void prepareScannerDisplay() {
-    pinMode(TFT_CS_PIN, OUTPUT);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-#endif
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    digitalWrite(TFT_CS_PIN, HIGH);
-    delayMicroseconds(80);
+    sharedSpiPrepareDisplay(true);
 }
 
 static void hardClearScannerDisplay() {
@@ -451,15 +438,7 @@ static void cleanupScanner(bool clearScreen) {
         }
     }
 
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    digitalWrite(TFT_CS_PIN, HIGH);
+    sharedSpiRelease(true);
 
     if (clearScreen) {
         hardClearScannerDisplay();
@@ -474,27 +453,23 @@ static bool initScannerRadios() {
     ledcWriteTone(0, 0);
 #endif
 
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
+    sharedSpiInitPins(true);
+    sharedSpiBeginMainBus();
+    delay(100);
 
-    scanRadioOk[0] = radio1.begin();
+    radio1.begin();
+#if NRF2_ENABLED
+    radio2.begin();
+#endif
+    delay(500);
+
+    bool radio1BeginOk = radio1.begin();
+    scanRadioOk[0] = radio1BeginOk && radio1.isChipConnected();
     if (scanRadioOk[0]) configureScannerRadio(radio1);
 
 #if NRF2_ENABLED
-    scanRadioOk[1] = radio2.begin();
+    bool radio2BeginOk = radio2.begin();
+    scanRadioOk[1] = radio2BeginOk && radio2.isChipConnected();
     if (scanRadioOk[1]) configureScannerRadio(radio2);
 #endif
 
@@ -605,7 +580,6 @@ static void drawSpectrumFrame() {
 }
 
 static void drawSpectrumBars() {
-    drawSpectrumGrid();
     spectrumNeedsClear = false;
 
     for (int i = 0; i < SCAN_LIMIT; i++) {

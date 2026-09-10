@@ -12,6 +12,7 @@
 #include "MenuSystem.h"
 #include "PepeDraw.h"
 #include "Pins.h"
+#include "SharedSpi.h"
 #include "SoundUtils.h"
 
 extern DisplayTFT tft;
@@ -48,14 +49,7 @@ static void drainGps(unsigned long ms) {
 static bool beginSd() {
     if (sdStarted) return true;
 
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
+    sharedSpiPrepareSd();
     sdSPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
 
     const uint32_t speeds[] = { 4000000, 10000000, 20000000 };
@@ -229,6 +223,8 @@ static bool saveGpsCsvPoint(const char* path, const char* eventName) {
     if (!ensureGpsCsv(path)) return false;
     return sdAppendTextFile(path, gpsCsvRow(eventName));
 }
+
+static const char* wifiAuthName(uint8_t type);
 
 static void runGpsPosition() {
     while (isEnterPressed() || isBackPressed()) delay(5);
@@ -448,6 +444,72 @@ static void runGpsConsole() {
         delay(5);
     }
     while (isEnterPressed() || isBackPressed()) delay(5);
+}
+
+static void runGpsNmeaLogger() {
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    beginGpsPort();
+    drawToolFrame("NMEA LOG SD");
+    drawStringCustom(8, 222, "BACK:STOP  OK(H):STOP", TFT_WHITE, 1);
+    beep(1800, 25);
+
+    bool sdOk = sdWriteTextFile("/GPS_NMEA.txt", "CYBERDECK GPS NMEA RAW\r\n");
+    unsigned long start = millis();
+    unsigned long lastDraw = 0;
+    unsigned long bytes = 0;
+    unsigned long lines = 0;
+    String chunk;
+    chunk.reserve(256);
+
+    bool exitTool = !sdOk;
+    while (!exitTool) {
+        while (gpsSerial.available()) {
+            char c = (char)gpsSerial.read();
+            gps.encode(c);
+            chunk += c;
+            bytes++;
+            if (c == '\n') lines++;
+            if (chunk.length() >= 220) {
+                sdAppendTextFile("/GPS_NMEA.txt", chunk);
+                chunk = "";
+            }
+        }
+
+        NavAction action = readNavAction(30);
+        if (action == NAV_BACK || isBackPressed()) {
+            exitTool = true;
+        } else if (action == NAV_ENTER && waitOkReleaseWasLong()) {
+            exitTool = true;
+        }
+
+        if (millis() - lastDraw > 350) {
+            tft.fillRect(8, 42, 304, 166, TFT_BLACK);
+            drawStringCustom(12, 50, sdOk ? "LOGGING RAW NMEA" : "SD ERROR",
+                             sdOk ? TFT_GREEN : TFT_RED, 2);
+            drawStringCustom(12, 82, "/GPS_NMEA.txt", TFT_CYAN, 1);
+            drawStringCustom(12, 108, "Time: " + String((millis() - start) / 1000) + "s",
+                             TFT_WHITE, 1);
+            drawStringCustom(12, 128, "Bytes: " + String(bytes) + " Lines: " + String(lines),
+                             TFT_WHITE, 1);
+            drawStringCustom(12, 150, "Sat:" + String(gpsSatCount()) +
+                " HDOP:" + gpsHdopText() + " Fix:" + String(gpsFreshFix() ? "YES" : "NO"),
+                TFT_WHITE, 1);
+            if (bytes == 0 && millis() - start > 3000) {
+                drawStringFit(12, 176, "No NMEA yet: check TX->GPIO18, VCC/GND and 9600 baud.",
+                              TFT_YELLOW, 296, 1);
+            } else {
+                drawStringFit(12, 176, "Leave outdoors, antenna up, then inspect this file.",
+                              UI_ACCENT, 296, 1);
+            }
+            lastDraw = millis();
+        }
+
+        delay(5);
+    }
+
+    if (chunk.length() > 0) sdAppendTextFile("/GPS_NMEA.txt", chunk);
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    flushNavInput(80);
 }
 
 static void exportGpsSnapshotReport();
@@ -770,18 +832,178 @@ static void runGpsWaypointMarker() {
     flushNavInput();
 }
 
+static String wardriveCleanField(String value) {
+    value.replace("\r", " ");
+    value.replace("\n", " ");
+    value.replace(",", " ");
+    if (value.length() == 0) value = "<hidden>";
+    return value;
+}
+
+static String wardriveCsvHeader() {
+    return "UTC,Millis,Lat,Lng,Sat,HDOP,SSID,BSSID,RSSI,Channel,Auth\r\n";
+}
+
+static bool ensureWardriveCsv() {
+    if (sdFileHasData("/WARD_DRIVE.csv")) return true;
+    return sdAppendTextFile("/WARD_DRIVE.csv", wardriveCsvHeader());
+}
+
+static bool appendWardriveScan(int& savedRows, int& seenNetworks) {
+    if (!gpsFreshFix(10000)) return false;
+    if (!ensureWardriveCsv()) return false;
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false, false);
+    delay(90);
+
+    int n = WiFi.scanNetworks(false, true);
+    if (n < 0) {
+        WiFi.scanDelete();
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+
+    seenNetworks = n;
+    String batch;
+    batch.reserve(max(256, n * 104));
+
+    String utc = gpsUtcStamp();
+    String lat = String(gps.location.lat(), 6);
+    String lng = String(gps.location.lng(), 6);
+    String sat = String(gpsSatCount());
+    String hdop = gpsHdopText();
+
+    for (int i = 0; i < n; i++) {
+        batch += utc + ",";
+        batch += String(millis()) + ",";
+        batch += lat + ",";
+        batch += lng + ",";
+        batch += sat + ",";
+        batch += hdop + ",";
+        batch += wardriveCleanField(WiFi.SSID(i)) + ",";
+        batch += WiFi.BSSIDstr(i) + ",";
+        batch += String(WiFi.RSSI(i)) + ",";
+        batch += String(WiFi.channel(i)) + ",";
+        batch += String(wifiAuthName(WiFi.encryptionType(i))) + "\r\n";
+    }
+
+    WiFi.scanDelete();
+    WiFi.mode(WIFI_OFF);
+
+    if (batch.length() == 0) return true;
+    if (!sdAppendTextFile("/WARD_DRIVE.csv", batch)) return false;
+    savedRows += n;
+    return true;
+}
+
+static void runWardrivingLogger() {
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    beginGpsPort();
+    drawToolFrame("WARDRIVING");
+    drawStringCustom(8, 222, "OK:START/PAUSE  UP/DN:RATE  BACK", TFT_WHITE, 1);
+    beep(1800, 25);
+
+    const int intervals[] = { 10, 20, 30, 60 };
+    int intervalIdx = 1;
+    bool logging = false;
+    bool sdOk = ensureWardriveCsv();
+    unsigned long lastDraw = 0;
+    unsigned long lastScan = 0;
+    int savedRows = 0;
+    int lastSeen = 0;
+    char status[48] = "";
+
+    snprintf(status, sizeof(status), sdOk ? "Ready: waits for fresh GPS fix" : "SD error");
+
+    bool exitTool = false;
+    while (!exitTool) {
+        drainGps(70);
+        NavAction action = readNavAction(120);
+
+        if (action == NAV_BACK) {
+            exitTool = true;
+        } else if (action == NAV_ENTER) {
+            bool held = waitOkReleaseWasLong();
+            if (held) {
+                exitTool = true;
+            } else if (sdOk) {
+                logging = !logging;
+                snprintf(status, sizeof(status), logging ? "Wardriving active" : "Paused");
+                beep(logging ? 2400 : 900, 40);
+                lastDraw = 0;
+                flushNavInput();
+            }
+        } else if (action == NAV_UP || action == NAV_DOWN) {
+            intervalIdx += (action == NAV_UP) ? 1 : -1;
+            if (intervalIdx < 0) intervalIdx = 3;
+            if (intervalIdx > 3) intervalIdx = 0;
+            snprintf(status, sizeof(status), "Scan interval %ds", intervals[intervalIdx]);
+            beep(2200, 15);
+            lastDraw = 0;
+        }
+
+        if (logging && sdOk &&
+            millis() - lastScan >= (unsigned long)intervals[intervalIdx] * 1000UL) {
+            if (!gpsFreshFix(10000)) {
+                snprintf(status, sizeof(status), "Waiting GPS fix: no rows saved");
+            } else {
+                bool ok = appendWardriveScan(savedRows, lastSeen);
+                snprintf(status, sizeof(status), ok ? "Scan OK: %d networks" : "Scan/SD error", lastSeen);
+                beep(ok ? 2600 : 900, 20);
+            }
+            lastScan = millis();
+            lastDraw = 0;
+        }
+
+        if (millis() - lastDraw > 350) {
+            tft.fillRect(8, 42, 304, 166, TFT_BLACK);
+            drawStringCustom(12, 48, logging ? "REC" : "PAUSED",
+                             logging ? TFT_GREEN : TFT_YELLOW, 2);
+            drawStringCustom(112, 52, "/WARD_DRIVE.csv", sdOk ? TFT_CYAN : TFT_RED, 1);
+            drawStringCustom(12, 80, "Interval: " + String(intervals[intervalIdx]) + "s",
+                             TFT_WHITE, 1);
+            drawStringCustom(150, 80, "Rows: " + String(savedRows), TFT_GREEN, 1);
+            drawStringCustom(230, 80, "Seen: " + String(lastSeen), TFT_WHITE, 1);
+
+            bool fix = gpsFreshFix(10000);
+            drawStringCustom(12, 108, "GPS: " + String(fix ? "FIX" : "WAIT"),
+                             fix ? TFT_GREEN : TFT_YELLOW, 1);
+            drawStringCustom(112, 108, "Sat:" + String(gpsSatCount()) + " HDOP:" + gpsHdopText(),
+                             TFT_WHITE, 1);
+            drawStringFit(12, 132,
+                          "Lat " + gpsField(fix, String(gps.location.lat(), 6)),
+                          TFT_WHITE, 296, 1);
+            drawStringFit(12, 150,
+                          "Lng " + gpsField(fix, String(gps.location.lng(), 6)),
+                          TFT_WHITE, 296, 1);
+            drawStringFit(12, 178, String(status), sdOk ? TFT_CYAN : TFT_RED, 296, 1);
+            lastDraw = millis();
+        }
+
+        delay(8);
+    }
+
+    WiFi.scanDelete();
+    WiFi.mode(WIFI_OFF);
+    while (isEnterPressed() || isBackPressed()) delay(5);
+    flushNavInput();
+}
+
 void runGpsTools() {
     beginGpsPort();
     static const char* gpsItems[] = {
         "Dashboard Pro",
         "Fix Assist",
         "Track Logger",
+        "Wardriving WiFi",
         "Compass",
         "Waypoint Mark",
         "Live Status",
         "Position",
         "Signal Stats",
         "NMEA Console",
+        "NMEA Log SD",
         "Export Snapshot"
     };
 
@@ -793,13 +1015,15 @@ void runGpsTools() {
             case  0: runGpsProDashboard(); break;
             case  1: runGpsFixAssist();    break;
             case  2: runGpsTrackLogger();  break;
-            case  3: runGpsCompass();      break;
-            case  4: runGpsWaypointMarker(); break;
-            case  5: runGpsStatus();       break;
-            case  6: runGpsPosition();     break;
-            case  7: runGpsStats();        break;
-            case  8: runGpsConsole();      break;
-            case  9: exportGpsSnapshotReport(); break;
+            case  3: runWardrivingLogger(); break;
+            case  4: runGpsCompass();      break;
+            case  5: runGpsWaypointMarker(); break;
+            case  6: runGpsStatus();       break;
+            case  7: runGpsPosition();     break;
+            case  8: runGpsStats();        break;
+            case  9: runGpsConsole();      break;
+            case 10: runGpsNmeaLogger();   break;
+            case 11: exportGpsSnapshotReport(); break;
         }
     }
 }
@@ -1219,6 +1443,8 @@ static String sdSizeText(uint64_t bytes) {
 static const char* const SD_REPORT_PATHS[] = {
     "/GPS_TRACK.csv",
     "/GPS_MARKS.csv",
+    "/WARD_DRIVE.csv",
+    "/GPS_NMEA.txt",
     "/GPS_SNAPSHOT.txt",
     "/THREAT_REPORT.txt",
     "/WIFI_DEFENSE.txt",

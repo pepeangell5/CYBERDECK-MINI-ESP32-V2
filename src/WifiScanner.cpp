@@ -274,8 +274,6 @@ static void drawScanningAnim(int tick) {
 // ═════════════════════════════════════════════════════════════════════════════
 static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
 
-    tft.fillScreen(TFT_BLACK);
-
     // Header
     tft.fillRect(0, 0, 320, 25, TFT_WHITE);
     String hdr = "NETS " + String(n) + "  SEL:" + String(cursor + 1);
@@ -285,6 +283,7 @@ static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
     for (int i = 0; i < VISIBLE_LINES; i++) {
         int idx = i + scrollOffset;
         int yPos = 35 + (i * 30);
+        tft.fillRect(5, yPos - 4, 305, 26, TFT_BLACK);
 
         if (idx < n) {
             int netIdx = idx;
@@ -315,6 +314,7 @@ static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
     }
 
     // Scroll bar lateral (si hay más entradas de las visibles)
+    tft.fillRect(314, 30, 4, 180, TFT_BLACK);
     int totalEntries = n;
     if (totalEntries > VISIBLE_LINES) {
         int barH = map(VISIBLE_LINES, 0, totalEntries, 20, 180);
@@ -385,6 +385,8 @@ void runWifiScan() {
     bool exitScan = false;
     bool needsRedraw = true;
 
+    tft.fillScreen(TFT_BLACK);
+
     while (!exitScan) {
 
         if (navBackPressed() || isBackPressed()) {
@@ -401,24 +403,28 @@ void runWifiScan() {
 
         // DOWN
         if (navDownPressed()) {
+            int oldScrollOffset = scrollOffset;
             cursor = (cursor + 1) % n;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_LINES)
                 scrollOffset = cursor - VISIBLE_LINES + 1;
             needsRedraw = true;
+            (void)oldScrollOffset;
             beep(2000, 30);
-            delay(200);
+            delay(70);
         }
 
         // UP
         if (navUpPressed()) {
+            int oldScrollOffset = scrollOffset;
             cursor = (cursor + n - 1) % n;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_LINES)
                 scrollOffset = cursor - VISIBLE_LINES + 1;
             needsRedraw = true;
+            (void)oldScrollOffset;
             beep(2000, 30);
-            delay(200);
+            delay(70);
         }
 
         // OK
@@ -429,6 +435,7 @@ void runWifiScan() {
             } else {
                 beep(1200, 50);
                 showDetails(networks[cursor]);
+                tft.fillScreen(TFT_BLACK);
                 needsRedraw = true;
             }
             delay(250);

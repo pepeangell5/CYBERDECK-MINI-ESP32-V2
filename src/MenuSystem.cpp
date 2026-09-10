@@ -379,13 +379,13 @@ static void redrawMainMenu(bool pressed = false) {
     }
 }
 
-static void changeMainEntry(int nextEntry) {
+static void changeMainEntry(int nextEntry, bool updatePreview = true) {
     int oldEntry = currentEntry;
     currentEntry = nextEntry;
     tft.startWrite();
     drawMainRow(oldEntry, false, false);
     drawMainRow(currentEntry, true, false);
-    drawPreviewPanel(false);
+    if (updatePreview) drawPreviewPanel(false);
     drawMainHeader();
     tft.endWrite();
 }
@@ -511,27 +511,43 @@ void runMainMenu() {
 
     unsigned long lastPress = 0;
     unsigned long lastActivity = millis();
+    bool previewDirty = false;
 
     while (true) {
-        NavAction action = readNavAction(120);
+        NavAction action = readNavAction(80);
 
-        if (action == NAV_UP && (millis() - lastPress > 80)) {
+        if (action == NAV_UP && (millis() - lastPress > 55)) {
             int prev = (currentEntry - 1 + MAIN_COUNT) % MAIN_COUNT;
             beep(2200, 25);
-            changeMainEntry(prev);
+            changeMainEntry(prev, false);
+            previewDirty = true;
             lastPress = millis();
             lastActivity = millis();
         }
 
-        if (action == NAV_DOWN && (millis() - lastPress > 80)) {
+        if (action == NAV_DOWN && (millis() - lastPress > 55)) {
             int next = (currentEntry + 1) % MAIN_COUNT;
             beep(2200, 25);
-            changeMainEntry(next);
+            changeMainEntry(next, false);
+            previewDirty = true;
             lastPress = millis();
             lastActivity = millis();
+        }
+
+        if (previewDirty && millis() - lastPress > 75) {
+            tft.startWrite();
+            drawPreviewPanel(false);
+            tft.endWrite();
+            previewDirty = false;
         }
 
         if (action == NAV_ENTER && (millis() - lastPress > 220)) {
+            if (previewDirty) {
+                tft.startWrite();
+                drawPreviewPanel(false);
+                tft.endWrite();
+                previewDirty = false;
+            }
             tft.startWrite();
             drawMainRow(currentEntry, true, true);
             tft.endWrite();
@@ -543,6 +559,7 @@ void runMainMenu() {
             MAIN_ENTRIES[currentEntry].handler();
 
             redrawMainMenu(false);
+            previewDirty = false;
             lastPress = millis();
             lastActivity = millis();
         }
@@ -550,6 +567,7 @@ void runMainMenu() {
         if (millis() - lastActivity > SCREENSAVER_IDLE_MS) {
             runScreensaver();
             redrawMainMenu(false);
+            previewDirty = false;
             lastActivity = millis();
             lastPress = millis();
         }
@@ -617,12 +635,31 @@ int runSubMenu(const char* title, const char* items[], int count) {
     };
 
     auto drawVisible = [&]() {
-        tft.fillRect(1, 35, 318, 171, MOD_BG);
         for (int row = 0; row < VISIBLE; row++) {
             int idx = scrollOffset + row;
             if (idx < totalItems) {
                 drawItem(idx, row, idx == cursor);
+            } else {
+                int y = LIST_Y + row * LINE_H;
+                tft.fillRect(10, y - 5, 300, LINE_H - 3, MOD_BG);
             }
+        }
+        drawScrollBar();
+    };
+
+    auto redrawMove = [&](int oldCursor, int oldScrollOffset) {
+        if (oldScrollOffset != scrollOffset) {
+            drawVisible();
+            return;
+        }
+
+        int oldRow = oldCursor - scrollOffset;
+        int newRow = cursor - scrollOffset;
+        if (oldRow >= 0 && oldRow < VISIBLE) {
+            drawItem(oldCursor, oldRow, false);
+        }
+        if (newRow >= 0 && newRow < VISIBLE) {
+            drawItem(cursor, newRow, true);
         }
         drawScrollBar();
     };
@@ -637,9 +674,11 @@ int runSubMenu(const char* title, const char* items[], int count) {
     tft.endWrite();
 
     while (result == -2) {
-        NavAction action = readNavAction(95);
+        NavAction action = readNavAction(60);
 
-        if (action == NAV_UP && (millis() - lastPress > 70)) {
+        if (action == NAV_UP && (millis() - lastPress > 45)) {
+            int oldCursor = cursor;
+            int oldScrollOffset = scrollOffset;
             cursor = (cursor - 1 + totalItems) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE) scrollOffset = cursor - VISIBLE + 1;
@@ -647,12 +686,14 @@ int runSubMenu(const char* title, const char* items[], int count) {
 
             beep(2200, 15);
             tft.startWrite();
-            drawVisible();
+            redrawMove(oldCursor, oldScrollOffset);
             tft.endWrite();
             lastPress = millis();
         }
 
-        if (action == NAV_DOWN && (millis() - lastPress > 70)) {
+        if (action == NAV_DOWN && (millis() - lastPress > 45)) {
+            int oldCursor = cursor;
+            int oldScrollOffset = scrollOffset;
             cursor = (cursor + 1) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE) scrollOffset = cursor - VISIBLE + 1;
@@ -660,7 +701,7 @@ int runSubMenu(const char* title, const char* items[], int count) {
 
             beep(2200, 15);
             tft.startWrite();
-            drawVisible();
+            redrawMove(oldCursor, oldScrollOffset);
             tft.endWrite();
             lastPress = millis();
         }

@@ -229,10 +229,8 @@ static void drawList(int cursor, int scrollOffset, int totalSeen) {
         tft.fillRect(235, 10, 75, 10, TFT_BLACK);
     }
 
-    // Área de lista (y=36 a y=212)
-    tft.fillRect(1, 33, 318, 180, TFT_BLACK);
-
     if (deviceCount == 0) {
+        tft.fillRect(1, 33, 318, 180, TFT_BLACK);
         drawStringCustom(70, 110, "Searching devices...", UI_ACCENT, 1);
         return;
     }
@@ -242,9 +240,10 @@ static void drawList(int cursor, int scrollOffset, int totalSeen) {
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + scrollOffset;
-        if (idx >= deviceCount) break;
-
         int y = listY + i * rowHeight;
+        tft.fillRect(5, y, 310, rowHeight - 2, TFT_BLACK);
+        if (idx >= deviceCount) continue;
+
         bool selected = (idx == cursor);
 
         if (selected) {
@@ -289,6 +288,7 @@ static void drawList(int cursor, int scrollOffset, int totalSeen) {
     }
 
     // Scroll bar lateral si hay más que VISIBLE_ROWS
+    tft.fillRect(314, 36, 4, 176, TFT_BLACK);
     if (deviceCount > VISIBLE_ROWS) {
         int total = deviceCount;
         int barH = (VISIBLE_ROWS * 176) / total;
@@ -466,7 +466,7 @@ void runBLEScanner() {
                     drawList(cursor, scrollOffset, deviceCount);
                     lastRedraw = millis();
                 }
-                delay(180);
+                delay(70);
             }
 
             // DOWN
@@ -480,7 +480,7 @@ void runBLEScanner() {
                     drawList(cursor, scrollOffset, deviceCount);
                     lastRedraw = millis();
                 }
-                delay(180);
+                delay(70);
             }
 
             // OK: press corto = entrar a detalles; press largo = salir

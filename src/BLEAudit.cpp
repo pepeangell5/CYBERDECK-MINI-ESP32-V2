@@ -307,7 +307,7 @@ static void drawBars(int x, int y, int rssi, bool selected) {
 
 static void drawAuditList(int cursor, int scroll) {
     uint16_t scoreCol = exposureColor();
-    tft.fillRect(1, 35, 318, 178, TFT_BLACK);
+    tft.fillRect(1, 35, 318, 57, TFT_BLACK);
 
     drawStringBig(10, 42, exposureLabel(), scoreCol, 2);
     drawStringCustom(150, 42, "SCORE " + String(bleExposureScore) + "/100", scoreCol, 1);
@@ -321,6 +321,7 @@ static void drawAuditList(int cursor, int scroll) {
     const int rowH = 23;
 
     if (bleDeviceCount == 0) {
+        tft.fillRect(1, listY - 3, 318, BLEA_VISIBLE_ROWS * rowH + 4, TFT_BLACK);
         drawStringCustom(52, 126, "Searching BLE advertisements...", TFT_CYAN, 1);
         drawStringCustom(52, 144, "Passive defensive scan", UI_ACCENT, 1);
     }
@@ -354,12 +355,12 @@ static void drawAuditList(int cursor, int scroll) {
         drawBars(282, y + 2, d.rssi, selected);
     }
 
+    int trackH = BLEA_VISIBLE_ROWS * rowH;
+    tft.fillRect(315, listY, 3, trackH, TFT_BLACK);
     if (bleDeviceCount > BLEA_VISIBLE_ROWS) {
-        int trackH = BLEA_VISIBLE_ROWS * rowH;
         int barH = (BLEA_VISIBLE_ROWS * trackH) / bleDeviceCount;
         if (barH < 8) barH = 8;
         int barY = listY + (scroll * (trackH - barH)) / (bleDeviceCount - BLEA_VISIBLE_ROWS);
-        tft.fillRect(315, listY, 3, trackH, TFT_BLACK);
         tft.fillRect(315, barY, 3, barH, TFT_CYAN);
     }
 

@@ -9,6 +9,7 @@
 #include "SplashScreen.h"
 #include "Input.h"
 #include "PeripheralTools.h"
+#include "SharedSpi.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ESP32-TOOLS · Firmware principal
@@ -40,20 +41,7 @@ void setup() {
     initInput();
 
     // ── SPI shared devices ──────────────────────────────────────────────
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
+    sharedSpiInitPins(true);
 
 #if TFT_LED_PIN >= 0
     pinMode(TFT_LED_PIN, OUTPUT);
@@ -78,7 +66,8 @@ void setup() {
     digitalWrite(TFT_RST_PIN, LOW);  delay(100);
     digitalWrite(TFT_RST_PIN, HIGH); delay(100);
 
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
+    sharedSpiBeginMainBus();
+    sharedSpiPrepareDisplay(true);
     tft.begin();
     tft.invertDisplay(false);
     tft.setRotation(3);

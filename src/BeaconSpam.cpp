@@ -313,6 +313,17 @@ static bool showDisclaimer() {
 // ═══════════════════════════════════════════════════════════════════════════
 //  MENÚ DE SELECCIÓN DE MODO
 // ═══════════════════════════════════════════════════════════════════════════
+static void drawModeMenuRow(int idx, bool selected) {
+    int y = 40 + idx * 26;
+    uint16_t bg = selected ? UI_SELECT : UI_BG;
+    uint16_t colMain = selected ? UI_BG : UI_MAIN;
+    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
+
+    tft.fillRect(5, y - 2, 310, 22, bg);
+    drawStringCustom(15, y + 2, MODE_NAMES[idx], colMain, 2);
+    drawStringCustom(15, y + 14, MODE_DESCS[idx], colSub, 1);
+}
+
 static void drawModeMenu(int cursor) {
     tft.fillScreen(TFT_BLACK);
     tft.drawRect(0, 0, 320, 240, UI_MAIN);
@@ -323,16 +334,7 @@ static void drawModeMenu(int cursor) {
     int totalItems = MODE_COUNT;
 
     for (int i = 0; i < totalItems; i++) {
-        int y = 40 + i * 26;
-        bool selected = (i == cursor);
-
-        if (selected) tft.fillRect(5, y - 2, 310, 22, UI_SELECT);
-
-        uint16_t colMain = selected ? UI_BG : UI_MAIN;
-        uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
-
-        drawStringCustom(15, y + 2, MODE_NAMES[i], colMain, 2);
-        drawStringCustom(15, y + 14, MODE_DESCS[i], colSub, 1);
+        drawModeMenuRow(i, i == cursor);
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
@@ -352,16 +354,24 @@ static int selectMode() {
             return -1;
         }
         if (navUpPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor - 1 + totalItems) % totalItems;
             beep(2100, 20);
-            drawModeMenu(cursor);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navDownPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor + 1) % totalItems;
             beep(2100, 20);
-            drawModeMenu(cursor);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();

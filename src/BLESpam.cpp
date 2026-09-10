@@ -321,6 +321,15 @@ static bool showDisclaimer() {
 // ═══════════════════════════════════════════════════════════════════════════
 //  MENÚ DE SELECCIÓN DE MODO
 // ═══════════════════════════════════════════════════════════════════════════
+static void drawModeMenuRow(int idx, bool selected) {
+    int y = 42 + idx * 24;
+    uint16_t bg = selected ? UI_SELECT : UI_BG;
+    uint16_t fg = selected ? UI_BG : UI_MAIN;
+
+    tft.fillRect(5, y - 2, 310, 20, bg);
+    drawStringCustom(15, y + 2, MODE_NAMES[idx], fg, 2);
+}
+
 static void drawModeMenu(int cursor) {
     clearBleSpamScreen();
     tft.drawRect(0, 0, 320, 240, UI_MAIN);
@@ -328,14 +337,8 @@ static void drawModeMenu(int cursor) {
     drawStringBig(10, 8, "BLE SPAM", UI_MAIN, 1);
     tft.drawFastHLine(0, 30, 320, UI_ACCENT);
 
-    // Lista
     for (int i = 0; i < MODE_COUNT; i++) {
-        int y = 42 + i * 24;
-        bool selected = (i == cursor);
-
-        if (selected) tft.fillRect(5, y - 2, 310, 20, UI_SELECT);
-        uint16_t fg = selected ? UI_BG : UI_MAIN;
-        drawStringCustom(15, y + 2, MODE_NAMES[i], fg, 2);
+        drawModeMenuRow(i, i == cursor);
     }
 
     // Footer
@@ -356,16 +359,24 @@ static int selectMode() {
             return -1;
         }
         if (digitalRead(BTN_UP) == LOW) {
+            int oldCursor = cursor;
             cursor = (cursor - 1 + MODE_COUNT) % MODE_COUNT;
             beep(2100, 20);
-            drawModeMenu(cursor);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (digitalRead(BTN_DOWN) == LOW) {
+            int oldCursor = cursor;
             cursor = (cursor + 1) % MODE_COUNT;
             beep(2100, 20);
-            drawModeMenu(cursor);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (isEnterPressed()) {
             bool held = waitOkReleaseWasLong();

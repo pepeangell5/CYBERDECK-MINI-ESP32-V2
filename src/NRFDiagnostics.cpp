@@ -7,6 +7,7 @@
 #include "Input.h"
 #include "PepeDraw.h"
 #include "Pins.h"
+#include "SharedSpi.h"
 
 extern DisplayTFT tft;
 
@@ -26,35 +27,13 @@ struct NrfLinkResult {
 };
 
 static void prepareNrfBus() {
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-
-    pinMode(NRF1_CE_PIN, OUTPUT);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
+    sharedSpiInitPins(true);
+    sharedSpiBeginMainBus();
     delay(20);
 }
 
 static NrfDiagResult testRadio(RF24& radio, uint8_t cePin, uint8_t csnPin) {
-    digitalWrite(TFT_CS_PIN, HIGH);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
+    sharedSpiPrepareRadio(true);
     delay(8);
 
     bool beginOk = radio.begin();
@@ -69,9 +48,9 @@ static NrfDiagResult testRadio(RF24& radio, uint8_t cePin, uint8_t csnPin) {
         radio.powerDown();
     }
 
-    digitalWrite(cePin, LOW);
-    digitalWrite(csnPin, HIGH);
-    digitalWrite(TFT_CS_PIN, HIGH);
+    (void)cePin;
+    (void)csnPin;
+    sharedSpiRelease(true);
     delay(8);
 
     return { beginOk, chipOk };
@@ -135,7 +114,7 @@ static NrfLinkResult testRadioLink(const NrfDiagResult& nrf1,
     static const uint8_t addr12[5] = { 'D', 'I', 'A', '1', '2' };
     static const uint8_t addr21[5] = { 'D', 'I', 'A', '2', '1' };
 
-    digitalWrite(TFT_CS_PIN, HIGH);
+    sharedSpiPrepareRadio(true);
     result.tx12Ok = testPacketLink(diagNrf1, diagNrf2, addr12, 0x12);
     result.tx21Ok = testPacketLink(diagNrf2, diagNrf1, addr21, 0x21);
 #endif
@@ -143,16 +122,8 @@ static NrfLinkResult testRadioLink(const NrfDiagResult& nrf1,
 }
 
 static void prepareNrfDiagnosticsDisplay() {
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    digitalWrite(TFT_CS_PIN, HIGH);
-    delayMicroseconds(80);
-
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
+    sharedSpiPrepareDisplay(true);
+    sharedSpiBeginMainBus();
     tft.begin();
     tft.invertDisplay(false);
     tft.setRotation(3);
@@ -233,7 +204,9 @@ static void drawNrfDiagnostics(const NrfDiagResult& nrf1, const NrfDiagResult& n
     drawDisabledRow(116, "NRF2", NRF2_CE_PIN, NRF2_CSN_PIN);
 #endif
 
-    drawStringCentered(214, "SPI SCK:12 MOSI:11 MISO:13  1MHz",
+    drawStringCentered(214, "SPI " + String(SCK_PIN) + "/" + String(MOSI_PIN) +
+                       "/" + String(MISO_PIN) + "  " +
+                       String(NRF_SPI_SPEED / 1000000) + "MHz  RF CH76",
                        TFT_WHITE, 1, FONT_SMALL);
     drawStringCentered(228, "OK: RETEST   BACK: MENU", TFT_WHITE, 1, FONT_SMALL);
 }

@@ -7,11 +7,16 @@
 #include "Input.h"
 #include "PepeDraw.h"
 #include "Pins.h"
+#include "SharedSpi.h"
 
 extern DisplayTFT tft;
 
-static RF24 jam1(NRF1_CE_PIN, NRF1_CSN_PIN, NRF_SPI_SPEED);
-static RF24 jam2(NRF2_CE_PIN, NRF2_CSN_PIN, NRF_SPI_SPEED);
+#ifndef RADIO_JAMMER_SPI_SPEED
+#define RADIO_JAMMER_SPI_SPEED 8000000
+#endif
+
+static RF24 jam1(NRF1_CE_PIN, NRF1_CSN_PIN, RADIO_JAMMER_SPI_SPEED);
+static RF24 jam2(NRF2_CE_PIN, NRF2_CSN_PIN, RADIO_JAMMER_SPI_SPEED);
 static bool jam1Ok = false;
 static bool jam2Ok = false;
 
@@ -32,13 +37,13 @@ static uint8_t wifiChannelToNrf(int channel) {
 
 static void configureRadio(RF24& radio) {
     radio.powerUp();
-    radio.setAddressWidth(3);
-    radio.setRetries(0, 0);
-    radio.setDataRate(RF24_2MBPS);
-    radio.setPALevel(RF24_PA_MAX);
-    radio.setCRCLength(RF24_CRC_DISABLED);
     radio.setAutoAck(false);
-    radio.openWritingPipe((uint8_t*)"JAM");
+    radio.setRetries(0, 0);
+    radio.setPayloadSize(32);
+    radio.setAddressWidth(5);
+    radio.setPALevel(RF24_PA_MAX, true);
+    radio.setDataRate(RF24_2MBPS);
+    radio.setCRCLength(RF24_CRC_DISABLED);
     radio.stopListening();
 }
 
@@ -47,28 +52,7 @@ static int activeRadioCount() {
 }
 
 static void prepareJammerDisplay() {
-    pinMode(TFT_CS_PIN, OUTPUT);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-#endif
-
-    if (!isAttacking) {
-        digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-        digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    }
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    digitalWrite(TFT_CS_PIN, HIGH);
-    delayMicroseconds(80);
+    sharedSpiPrepareDisplay(!isAttacking);
 }
 
 static void clearJammerScreen() {
@@ -92,10 +76,19 @@ static void drawHeader(const char* title, const String& status, uint16_t color) 
     tft.drawFastHLine(0, 36, 320, TFT_WHITE);
 }
 
-static void drawChannelGauge() {
-    clearJammerScreen();
-    drawHeader("JAMMER CANAL", isAttacking ? "ACTIVO" : "LISTO",
-               isAttacking ? TFT_RED : TFT_WHITE);
+static void drawChannelGauge(bool full = true) {
+    if (full) {
+        clearJammerScreen();
+        drawHeader("JAMMER CANAL", isAttacking ? "ACTIVO" : "LISTO",
+                   isAttacking ? TFT_RED : TFT_WHITE);
+        tft.drawFastHLine(0, 214, 320, TFT_WHITE);
+        drawStringCustom(8, 222, "UP/DN: CANAL", TFT_WHITE, 1);
+        drawStringRight(312, 222, "BACK/OK(H): BACK", TFT_WHITE, 1);
+    } else {
+        prepareJammerDisplay();
+    }
+
+    tft.fillRect(1, 42, 318, 166, TFT_BLACK);
 
     String chText = "CH " + String(jamChannel);
     drawStringCentered(56, chText, TFT_YELLOW, 3, FONT_BIG);
@@ -123,9 +116,6 @@ static void drawChannelGauge() {
         drawStringCentered(174, "OK: START", TFT_GREEN, 1, FONT_SMALL);
     }
 
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-    drawStringCustom(8, 222, "UP/DN: CANAL", TFT_WHITE, 1);
-    drawStringRight(312, 222, "BACK/OK(H): BACK", TFT_WHITE, 1);
 }
 
 static void drawChannelBars() {
@@ -140,32 +130,27 @@ static void drawChannelBars() {
 }
 
 void jammerSetup() {
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
+    sharedSpiInitPins(true);
+    sharedSpiBeginMainBus();
+    delay(100);
+
+    jam1.begin();
 #if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-    digitalWrite(NRF2_CE_PIN, LOW);
+    jam2.begin();
+#else
+    jam2Ok = false;
 #endif
 
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
-    delay(20);
+    delay(500);
 
-    jam1Ok = jam1.begin();
+    bool jam1BeginOk = jam1.begin();
+    jam1Ok = jam1BeginOk && jam1.isChipConnected();
     if (jam1Ok) configureRadio(jam1);
 
 #if NRF2_ENABLED
-    jam2Ok = jam2.begin();
+    bool jam2BeginOk = jam2.begin();
+    jam2Ok = jam2BeginOk && jam2.isChipConnected();
     if (jam2Ok) configureRadio(jam2);
-#else
-    jam2Ok = false;
 #endif
 
     Serial.printf("[jammer] NRF1 CE:%d CSN:%d -> %s\n",
@@ -197,8 +182,8 @@ void jammerLoop() {
         if (isAttacking && jam2Ok) {
             jam2.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
         }
-        drawChannelGauge();
-        delay(180);
+        drawChannelGauge(false);
+        delay(70);
     }
 
     if (digitalRead(BTN_DOWN) == LOW) {
@@ -209,8 +194,8 @@ void jammerLoop() {
         if (isAttacking && jam2Ok) {
             jam2.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
         }
-        drawChannelGauge();
-        delay(180);
+        drawChannelGauge(false);
+        delay(70);
     }
 
     if (isEnterPressed()) {
@@ -235,14 +220,7 @@ void jammerLoop() {
     }
 
     if (isAttacking) {
-        uint8_t freq = wifiChannelToNrf(jamChannel);
-        (void)freq;
-
-        static unsigned long lastDraw = 0;
-        if (millis() - lastDraw > 220) {
-            drawChannelBars();
-            lastDraw = millis();
-        }
+        delayMicroseconds(150);
     }
 }
 

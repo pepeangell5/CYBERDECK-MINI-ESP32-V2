@@ -8,6 +8,7 @@
 #include "Input.h"
 #include "PepeDraw.h"
 #include "Pins.h"
+#include "SharedSpi.h"
 
 extern DisplayTFT tft;
 
@@ -90,28 +91,7 @@ static void advanceBtSweep() {
 }
 
 static void prepareBtDisplay() {
-    pinMode(TFT_CS_PIN, OUTPUT);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-#endif
-
-    if (!isBtJamming) {
-        digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-        digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-    }
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    digitalWrite(TFT_CS_PIN, HIGH);
-    delayMicroseconds(80);
+    sharedSpiPrepareDisplay(!isBtJamming);
 }
 
 static void clearBtScreen() {
@@ -239,22 +219,8 @@ static void drawBtScreen() {
 void btJammerSetup() {
     randomSeed(esp_random());
 
-    pinMode(TFT_CS_PIN, OUTPUT);
-    digitalWrite(TFT_CS_PIN, HIGH);
-    pinMode(NRF1_CSN_PIN, OUTPUT);
-    digitalWrite(NRF1_CSN_PIN, HIGH);
-#if NRF2_ENABLED
-    pinMode(NRF2_CSN_PIN, OUTPUT);
-    digitalWrite(NRF2_CSN_PIN, HIGH);
-#endif
-    pinMode(NRF1_CE_PIN, OUTPUT);
-    digitalWrite(NRF1_CE_PIN, LOW);
-#if NRF2_ENABLED
-    pinMode(NRF2_CE_PIN, OUTPUT);
-    digitalWrite(NRF2_CE_PIN, LOW);
-#endif
-
-    SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN);
+    sharedSpiInitPins(true);
+    sharedSpiBeginMainBus();
     delay(100);
 
     btJam1.begin();

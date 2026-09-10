@@ -313,16 +313,24 @@ static void drawMeter(int score) {
     tft.fillRect(x + 2, y + h - 2 - fillH, w - 4, fillH, col);
 }
 
-static void drawThreatScreen() {
+static void drawThreatScreen(bool full = false) {
     int score = riskScore();
     uint16_t col = riskColor(score);
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(8, 7, "THREAT MON", TFT_WHITE, 1);
+    if (full) {
+        tft.fillScreen(TFT_BLACK);
+        tft.drawRect(0, 0, 320, 240, TFT_WHITE);
+        drawStringBig(8, 7, "THREAT MON", TFT_WHITE, 1);
+        tft.drawFastHLine(0, 34, 320, UI_ACCENT);
+        tft.drawFastHLine(0, 214, 320, UI_ACCENT);
+    }
+
+    tft.fillRect(188, 6, 122, 22, TFT_BLACK);
     drawStringCustom(194, 12, tmPaused ? "PAUSED" : "LIVE", tmPaused ? TFT_YELLOW : TFT_GREEN, 1);
     drawStringCustom(250, 12, "CH" + String(tmChannel), TFT_CYAN, 1);
-    tft.drawFastHLine(0, 34, 320, UI_ACCENT);
+
+    tft.fillRect(10, 40, 250, 164, TFT_BLACK);
+    tft.fillRect(268, 46, 38, 132, TFT_BLACK);
 
     drawStringBig(12, 44, riskLabel(score), col, 2);
     drawStringCustom(14, 82, "SCORE:" + String(score) +
@@ -346,7 +354,7 @@ static void drawThreatScreen() {
 
     String hint = tmPaused ? "OK:LIVE  UP/DN:CH  BACK/OK(H):EXIT"
                            : "OK:SAVE  UP/DN:CH  BACK/OK(H):EXIT";
-    tft.drawFastHLine(0, 214, 320, UI_ACCENT);
+    tft.fillRect(1, 215, 318, 24, TFT_BLACK);
     drawStringCustom(8, 222, hint, UI_ACCENT, 1);
 }
 
@@ -450,7 +458,7 @@ void runThreatMonitor() {
     unsigned long lastHop = millis();
     unsigned long lastSecond = millis();
     bool exitMonitor = false;
-    drawThreatScreen();
+    drawThreatScreen(true);
 
     while (!exitMonitor) {
         unsigned long now = millis();
@@ -511,7 +519,7 @@ void runThreatMonitor() {
                 bool ok = exportThreatReport();
                 beep(ok ? 2400 : 900, 45);
                 showExportResult(ok);
-                drawThreatScreen();
+                drawThreatScreen(true);
             }
         }
 

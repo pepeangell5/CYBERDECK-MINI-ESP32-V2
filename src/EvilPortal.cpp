@@ -324,13 +324,13 @@ static int selectMainMenu() {
             cursor = (cursor + 2) % 3;
             beep(2100, 20);
             drawMainMenu(cursor);
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % 3;
             beep(2100, 20);
             drawMainMenu(cursor);
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -390,11 +390,11 @@ static int selectMode() {
         }
         if (navUpPressed()) {
             cursor = (cursor + 1) % 2;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % 2;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -462,14 +462,14 @@ static int selectPresetSSID() {
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -615,14 +615,14 @@ static int selectCloneTarget() {
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -969,13 +969,13 @@ static void viewLogs() {
             cursor = (cursor + total - 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + 4) scrollOffset = cursor - 3;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % total;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + 4) scrollOffset = cursor - 3;
-            beep(2100, 20); draw(); delay(180);
+            beep(2100, 20); draw(); delay(70);
         }
         if (navBackPressed()) {
             while (navBackPressed()) delay(5);

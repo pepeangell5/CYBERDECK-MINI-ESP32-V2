@@ -311,7 +311,7 @@ static int selectTarget() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawTargetList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % totalItems;
@@ -320,7 +320,7 @@ static int selectTarget() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
             drawTargetList(cursor, scrollOffset);
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
@@ -337,6 +337,17 @@ static int selectTarget() {
 // ═══════════════════════════════════════════════════════════════════════════
 //  PANTALLA 3 · SELECCIÓN DE MODO
 // ═══════════════════════════════════════════════════════════════════════════
+static void drawModeMenuRow(int idx, bool selected) {
+    int y = 70 + idx * 26;
+    uint16_t bg = selected ? UI_SELECT : UI_BG;
+    uint16_t colMain = selected ? UI_BG : UI_MAIN;
+    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
+
+    tft.fillRect(5, y - 2, 310, 22, bg);
+    drawStringCustom(15, y + 2, ATK_NAMES[idx], colMain, 2);
+    drawStringCustom(15, y + 14, ATK_DESCS[idx], colSub, 1);
+}
+
 static void drawModeMenu(int cursor, const Target& t) {
     tft.fillScreen(TFT_BLACK);
     tft.drawRect(0, 0, 320, 240, UI_MAIN);
@@ -351,16 +362,7 @@ static void drawModeMenu(int cursor, const Target& t) {
 
     int totalItems = ATK_COUNT;
     for (int i = 0; i < totalItems; i++) {
-        int y = 70 + i * 26;
-        bool selected = (i == cursor);
-
-        if (selected) tft.fillRect(5, y - 2, 310, 22, UI_SELECT);
-
-        uint16_t colMain = selected ? UI_BG : UI_MAIN;
-        uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
-
-        drawStringCustom(15, y + 2, ATK_NAMES[i], colMain, 2);
-        drawStringCustom(15, y + 14, ATK_DESCS[i], colSub, 1);
+        drawModeMenuRow(i, i == cursor);
     }
 
     tft.drawFastHLine(0, 215, 320, UI_ACCENT);
@@ -383,16 +385,24 @@ static int selectAttackMode(const Target& t) {
             return -1;
         }
         if (navUpPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor - 1 + totalItems) % totalItems;
             beep(2100, 20);
-            drawModeMenu(cursor, t);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navDownPressed()) {
+            int oldCursor = cursor;
             cursor = (cursor + 1) % totalItems;
             beep(2100, 20);
-            drawModeMenu(cursor, t);
-            delay(180);
+            tft.startWrite();
+            drawModeMenuRow(oldCursor, false);
+            drawModeMenuRow(cursor, true);
+            tft.endWrite();
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();

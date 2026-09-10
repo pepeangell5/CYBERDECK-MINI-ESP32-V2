@@ -416,7 +416,7 @@ void runPacketMonitor() {
                 drawChannel();
                 playChannelBlip();
             }
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             if (monitorChannel > 1) {
@@ -425,7 +425,7 @@ void runPacketMonitor() {
                 drawChannel();
                 playChannelBlip();
             }
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();

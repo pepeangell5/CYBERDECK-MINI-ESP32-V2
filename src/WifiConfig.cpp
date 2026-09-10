@@ -366,7 +366,7 @@ static int selectNetwork() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 15);
             draw();
-            delay(180);
+            delay(70);
         }
         if (navDownPressed()) {
             cursor = (cursor + 1) % total;
@@ -375,7 +375,7 @@ static int selectNetwork() {
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 15);
             draw();
-            delay(180);
+            delay(70);
         }
         if (navEnterPressed()) {
             bool held = waitOkReleaseWasLong();
