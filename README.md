@@ -12,7 +12,7 @@
   <a href="https://instagram.com/esp32_tools"><img alt="Instagram" src="https://img.shields.io/badge/INSTAGRAM-ESP32__TOOLS-E4405F?style=for-the-badge&logo=instagram&logoColor=white"></a>
 </p>
 
-![Menú principal de CYBERDECK MINI ESP32 V2](img/menu_principal.JPG)
+![Splash de CYBERDECK MINI ESP32 V2](img/splash.jpeg)
 
 > [!IMPORTANT]
 > Utiliza este firmware únicamente con redes, dispositivos y laboratorios propios o con autorización expresa. Las herramientas inalámbricas están destinadas a aprendizaje, diagnóstico, investigación y auditorías autorizadas.
@@ -62,25 +62,25 @@ La V2 conserva las funciones del firmware original y añade una identidad visual
 
 ## Galería
 
-| Menú principal | WiFi |
+| Splash | Menú principal: WiFi |
 | --- | --- |
-| ![Menú principal](img/menu_principal.JPG) | ![Herramientas WiFi](img/wifi_tool.JPG) |
+| ![Splash con ajolote](img/splash.jpeg) | ![Carrusel WiFi](img/wifi.jpeg) |
 
-| WiFi: segunda página | Radio / RF |
+| WiFi Tools | WiFi Scanner |
 | --- | --- |
-| ![Segunda página WiFi](img/wifi_tool_2.JPG) | ![Herramientas de radio](img/radio_tool.JPG) |
+| ![Lista de herramientas WiFi](img/wifi_tools.jpeg) | ![WiFi Scanner](img/scanner.jpeg) |
 
-| Bluetooth | Monitor de paquetes |
+| Radio / RF | Bluetooth |
 | --- | --- |
-| ![Herramientas Bluetooth](img/bluetooth.JPG) | ![Monitor de paquetes](img/pkt_monitor.JPG) |
+| ![Carrusel Radio RF](img/radio.jpeg) | ![Carrusel Bluetooth](img/bluetooth.jpeg) |
 
-| System | Herramientas de sistema |
+| Monitor | System |
 | --- | --- |
-| ![Menú System](img/system.JPG) | ![Herramientas de sistema](img/system2.JPG) |
+| ![Carrusel Monitor](img/monitor.jpeg) | ![Carrusel System](img/system.jpeg) |
 
-| Threat Monitor |
-| --- |
-| ![Threat Monitor](img/threat_mon.JPG) |
+| Deauther | Evil Portal |
+| --- | --- |
+| ![Pantalla Deauther](img/deauther.jpeg) | ![Pantalla Evil Portal](img/evilportal.jpeg) |
 
 [⬆️ Regresar al menú](#menu)
 
