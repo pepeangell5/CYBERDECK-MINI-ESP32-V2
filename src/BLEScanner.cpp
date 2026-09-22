@@ -8,6 +8,7 @@
 #include "Pins.h"
 #include "Input.h"
 #include "SoundUtils.h"
+#include "BtUi.h"
 
 extern DisplayTFT tft;
 
@@ -200,100 +201,97 @@ class BLEScanCallback : public BLEAdvertisedDeviceCallbacks {
 //  DIBUJO · LISTA PRINCIPAL
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawListFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+    btUiFrame("BLE SCANNER", "SCANNING", BT_UI_GLOW);
+    btUiFooter("UP/DN: NAV", "OK: INFO  HOLD: EXIT", BT_UI_ACCENT);
+}
 
-    // Header
-    drawStringBig(10, 8, "BLE SCAN", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+static void drawScannerAnimation(uint8_t frame) {
+    const int cx = 160;
+    const int cy = 104;
+    static const int8_t dx[8] = {34, 24, 0, -24, -34, -24, 0, 24};
+    static const int8_t dy[8] = {0, 24, 34, 24, 0, -24, -34, -24};
+    tft.fillRect(122, 66, 76, 76, BT_UI_PANEL);
+    tft.drawCircle(cx, cy, 35, BT_UI_LINE);
+    tft.drawCircle(cx, cy, 22, BT_UI_ACCENT);
+    tft.fillCircle(cx, cy, 4, BT_UI_GLOW);
+    uint8_t p = frame & 7;
+    tft.drawLine(cx, cy, cx + dx[p], cy + dy[p], BT_UI_GLOW);
+    tft.drawLine(cx + 1, cy, cx + dx[p] + 1, cy + dy[p], BT_UI_GLOW);
+    tft.drawLine(cx - 1, cy, cx + dx[p] - 1, cy + dy[p], BT_UI_GLOW);
+    tft.fillCircle(cx + dx[p], cy + dy[p], 5, BT_UI_OK);
+}
 
-    // Footer
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "UP/DN/ENC:NAV  OK:INFO  BACK/OK-H:EXIT",
-                     UI_ACCENT, 1);
+static void drawListRow(int idx, int row, bool selected) {
+    const int rowHeight = 26;
+    const int y = 47 + row * rowHeight;
+    tft.fillRect(8, y, 303, rowHeight - 2, BT_UI_BG);
+    if (idx < 0 || idx >= deviceCount) return;
+
+    if (selected) tft.fillRoundRect(9, y, 300, rowHeight - 2, 5, BT_UI_ACCENT);
+    uint16_t colMain = selected ? BT_UI_BG : BT_UI_TEXT;
+    uint16_t colSub  = selected ? BT_UI_BG : BT_UI_MUTED;
+    BLEDev& d = devices[idx];
+
+    String displayName = d.name.length() > 0 ? d.name : "<unnamed>";
+    if (getTextWidth(displayName, 2) <= 190) {
+        drawStringCustom(10, y + 4, displayName, colMain, 2);
+    } else {
+        drawStringFit(10, y + 8, displayName, colMain, 190, 1);
+    }
+    drawStringCustom(10, y + 18, d.mac, colSub, 1);
+    drawStringCustom(210, y + 4, String(d.rssi) + "dBm", colMain, 2);
+
+    int bars = rssiBars(d.rssi);
+    int bx = 282, by = y + 22;
+    for (int b = 0; b < 4; b++) {
+        int bh = 3 + b * 2;
+        uint16_t c = (b < bars)
+            ? (selected ? BT_UI_BG : (bars >= 3 ? TFT_GREEN :
+                                      bars >= 2 ? TFT_YELLOW : TFT_ORANGE))
+            : (selected ? BT_UI_BG : BT_UI_ACCENT);
+        if (b < bars) tft.fillRect(bx + b*5, by - bh, 3, bh, c);
+        else          tft.drawRect(bx + b*5, by - bh, 3, bh, c);
+    }
 }
 
 // Dibuja la lista de dispositivos + contador
 static void drawList(int cursor, int scrollOffset, int totalSeen) {
     // Limpiar área de contador (sin redibujar todo el header)
-    tft.fillRect(140, 8, 175, 16, TFT_BLACK);
+    tft.fillRect(216, 14, 88, 12, BT_UI_PANEL);
 
     // Contador "FOUND: N"
     String hdr = "FOUND: " + String(deviceCount);
-    drawStringCustom(150, 12, hdr, UI_SELECT, 1);
-
-    // Indicador "SCANNING..." parpadeante
-    if ((millis() / 500) % 2) {
-        drawStringCustom(235, 12, "SCANNING", UI_ACCENT, 1);
-    } else {
-        tft.fillRect(235, 10, 75, 10, TFT_BLACK);
-    }
+    drawStringRight(302, 17, hdr, BT_UI_GLOW, 1);
 
     if (deviceCount == 0) {
-        tft.fillRect(1, 33, 318, 180, TFT_BLACK);
-        drawStringCustom(70, 110, "Searching devices...", UI_ACCENT, 1);
+        tft.fillRect(8, 47, 304, 157, BT_UI_BG);
+        btUiCard(28, 52, 264, 148, false, BT_UI_ACCENT);
+        drawScannerAnimation(0);
+        drawStringCentered(148, "SEARCHING BLE", BT_UI_GLOW, 1, FONT_BIG);
+        drawStringCentered(166, "LISTENING FOR ADVERTISEMENTS",
+                           BT_UI_MUTED, 1, FONT_SMALL);
+        btUiProgress(48, 184, 224, 8, 55, BT_UI_ACCENT);
         return;
     }
 
-    const int rowHeight = 28;
-    const int listY = 36;
+    // Full redraws must erase the search card and any previous menu pixels.
+    tft.fillRect(8, 44, 304, 161, BT_UI_BG);
+
+    const int rowHeight = 26;
+    const int listY = 47;
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + scrollOffset;
-        int y = listY + i * rowHeight;
-        tft.fillRect(5, y, 310, rowHeight - 2, TFT_BLACK);
-        if (idx >= deviceCount) continue;
-
-        bool selected = (idx == cursor);
-
-        if (selected) {
-            tft.fillRect(5, y, 310, rowHeight - 2, UI_SELECT);
-        }
-
-        uint16_t colMain = selected ? UI_BG : UI_MAIN;
-        uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
-
-        BLEDev& d = devices[idx];
-
-        // Nombre (o "<unnamed>")
-        String displayName = d.name.length() > 0 ? d.name : "<unnamed>";
-        if (getTextWidth(displayName, 2) <= 190) {
-            drawStringCustom(10, y + 4, displayName, colMain, 2);
-        } else {
-            drawStringFit(10, y + 8, displayName, colMain, 190, 1);
-        }
-
-        // MAC (debajo, más pequeño)
-        drawStringCustom(10, y + 18, d.mac, colSub, 1);
-
-        // RSSI + barras a la derecha
-        String rssiStr = String(d.rssi) + "dBm";
-        drawStringCustom(210, y + 4, rssiStr, colMain, 2);
-
-        // Barras de señal
-        int bars = rssiBars(d.rssi);
-        int bx = 280, by = y + 23;
-        for (int b = 0; b < 4; b++) {
-            int bh = 3 + b * 2;
-            uint16_t c = (b < bars)
-                ? (selected ? UI_BG : (bars >= 3 ? TFT_GREEN :
-                                       bars >= 2 ? TFT_YELLOW : TFT_ORANGE))
-                : (selected ? UI_BG : UI_ACCENT);
-            if (b < bars) {
-                tft.fillRect(bx + b*5, by - bh, 3, bh, c);
-            } else {
-                tft.drawRect(bx + b*5, by - bh, 3, bh, c);
-            }
-        }
+        drawListRow(idx, i, idx == cursor);
     }
 
     // Scroll bar lateral si hay más que VISIBLE_ROWS
-    tft.fillRect(314, 36, 4, 176, TFT_BLACK);
+    tft.fillRect(312, 48, 3, 156, BT_UI_BG);
     if (deviceCount > VISIBLE_ROWS) {
         int total = deviceCount;
-        int barH = (VISIBLE_ROWS * 176) / total;
-        int barY = 36 + (scrollOffset * (176 - barH)) / (total - VISIBLE_ROWS);
-        tft.fillRect(314, barY, 4, barH, UI_ACCENT);
+        int barH = (VISIBLE_ROWS * 156) / total;
+        int barY = 48 + (scrollOffset * (156 - barH)) / (total - VISIBLE_ROWS);
+        tft.fillRect(312, barY, 3, barH, BT_UI_ACCENT);
     }
 }
 
@@ -301,14 +299,9 @@ static void drawList(int cursor, int scrollOffset, int totalSeen) {
 //  DIBUJO · PANTALLA DE DETALLES
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawDetails(const BLEDev& d) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+    btUiFrame("BLE DEVICE", "DETAILS", BT_UI_GLOW);
 
-    // Header
-    drawStringBig(10, 8, "DEVICE DETAILS", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    int y = 40;
+    int y = 50;
     const int lineH = 14;
 
     // Nombre
@@ -379,8 +372,7 @@ static void drawDetails(const BLEDev& d) {
     }
 
     // Footer
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK/BACK: RETURN TO LIST", UI_ACCENT, 1);
+    btUiFooter("DEVICE INSPECTOR", "OK/BACK: LIST", BT_UI_ACCENT);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -421,6 +413,9 @@ void runBLEScanner() {
 
     unsigned long lastScanStart = 0;
     unsigned long lastRedraw = 0;
+    unsigned long lastAnimMs = 0;
+    uint8_t scanFrame = 0;
+    bool showingSearch = true;
     bool needsRedraw = false;
     unsigned long okPressStart = 0;
     bool okHeld = false;
@@ -438,6 +433,7 @@ void runBLEScanner() {
             sortDevices();
             // Asegurar que el cursor siga válido tras re-ordenar
             if (cursor >= deviceCount && deviceCount > 0) cursor = deviceCount - 1;
+            showingSearch = (deviceCount == 0);
             needsRedraw = !inDetails;
         }
 
@@ -448,6 +444,11 @@ void runBLEScanner() {
             needsRedraw = false;
         }
 
+        if (!inDetails && showingSearch && millis() - lastAnimMs >= 105) {
+            drawScannerAnimation(scanFrame++);
+            lastAnimMs = millis();
+        }
+
         // ── Controles en modo LISTA ────────────────────────────────────
         if (!inDetails) {
 
@@ -455,32 +456,48 @@ void runBLEScanner() {
                 exitScreen = true;
             }
 
+            NavAction action = readNavAction(110);
+
             // UP
-            if (navUpPressed()) {
+            if (action == NAV_UP) {
                 if (deviceCount > 0) {
+                    int oldCursor = cursor;
+                    int oldScroll = scrollOffset;
                     cursor = (cursor - 1 + deviceCount) % deviceCount;
                     if (cursor < scrollOffset) scrollOffset = cursor;
                     if (cursor >= scrollOffset + VISIBLE_ROWS)
                         scrollOffset = cursor - VISIBLE_ROWS + 1;
                     beep(2200, 20);
-                    drawList(cursor, scrollOffset, deviceCount);
+                    if (scrollOffset != oldScroll) drawList(cursor, scrollOffset, deviceCount);
+                    else {
+                        tft.startWrite();
+                        drawListRow(oldCursor, oldCursor - scrollOffset, false);
+                        drawListRow(cursor, cursor - scrollOffset, true);
+                        tft.endWrite();
+                    }
                     lastRedraw = millis();
                 }
-                delay(70);
             }
 
             // DOWN
-            if (navDownPressed()) {
+            if (action == NAV_DOWN) {
                 if (deviceCount > 0) {
+                    int oldCursor = cursor;
+                    int oldScroll = scrollOffset;
                     cursor = (cursor + 1) % deviceCount;
                     if (cursor < scrollOffset) scrollOffset = cursor;
                     if (cursor >= scrollOffset + VISIBLE_ROWS)
                         scrollOffset = cursor - VISIBLE_ROWS + 1;
                     beep(2200, 20);
-                    drawList(cursor, scrollOffset, deviceCount);
+                    if (scrollOffset != oldScroll) drawList(cursor, scrollOffset, deviceCount);
+                    else {
+                        tft.startWrite();
+                        drawListRow(oldCursor, oldCursor - scrollOffset, false);
+                        drawListRow(cursor, cursor - scrollOffset, true);
+                        tft.endWrite();
+                    }
                     lastRedraw = millis();
                 }
-                delay(70);
             }
 
             // OK: press corto = entrar a detalles; press largo = salir

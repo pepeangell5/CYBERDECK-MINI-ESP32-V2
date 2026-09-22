@@ -6,6 +6,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 
@@ -127,14 +128,10 @@ static void karmaProbeCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static bool showDisclaimer() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
+    wifiUiFrame("KARMA", "NOTICE", WIFI_UI_DANGER);
+    wifiUiCard(10, 49, 300, 151, false, WIFI_UI_DANGER);
 
-    drawStringBig(80, 12, "KARMA", TFT_RED, 2);
-    tft.drawFastHLine(0, 50, 320, TFT_RED);
-
-    int y = 60;
+    int y = 57;
     drawStringCustom(10, y, "Captura los SSIDs que buscan",   UI_MAIN, 1); y += 12;
     drawStringCustom(10, y, "celulares cercanos y los",       UI_MAIN, 1); y += 12;
     drawStringCustom(10, y, "anuncia como redes existentes.", UI_MAIN, 1); y += 20;
@@ -149,8 +146,8 @@ static bool showDisclaimer() {
     drawStringCustom(10, y, "Atacar dispositivos ajenos =",    TFT_RED, 1); y += 12;
     drawStringCustom(10, y, "delito federal (Art. 211 bis).",  TFT_RED, 1);
 
-    tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: ENTIENDO   BACK/UP/DN: SALIR", UI_ACCENT, 1);
+    wifiUiFooter("AUTHORIZED AUDIT", "OK: I UNDERSTAND",
+                 WIFI_UI_DANGER);
 
     while (true) {
         if (navEnterPressed()) {
@@ -221,20 +218,15 @@ static bool runProbeCaptureFase() {
     scanProbeTotal = 0;
     hopIdx = 0;
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(10, 8, "KARMA", UI_MAIN, 1);
-    drawStringCustom(220, 12, "[FASE 1/2]", TFT_CYAN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    drawStringCustom(10, 42, "Capturando probes...", UI_MAIN, 1);
-    drawStringCustom(10, 56, "Duracion: " + String(SCAN_TIME_S) + "s",
-                     UI_ACCENT, 1);
-    drawStringCustom(10, 68, "Espera a que celulares cercanos", UI_ACCENT, 1);
-    drawStringCustom(10, 80, "envien probe requests.", UI_ACCENT, 1);
-
-    int barX = 10, barY = 105, barW = 300, barH = 14;
-    tft.drawRect(barX, barY, barW, barH, UI_ACCENT);
+    wifiUiFrame("KARMA", "PHASE 1/2", WIFI_UI_ACCENT);
+    wifiUiCard(10, 49, 300, 56, false);
+    drawStringBig(18, 58, "CAPTURING PROBES", WIFI_UI_ACCENT, 1);
+    drawStringCustom(18, 81, "PASSIVE LISTENING + CHANNEL HOP",
+                     WIFI_UI_MUTED, 1);
+    wifiUiProgress(10, 113, 300, 12, 0, WIFI_UI_OK);
+    wifiUiMetric(10, 135, 145, "UNIQUE SSIDs", "0", WIFI_UI_OK);
+    wifiUiMetric(165, 135, 145, "PROBES", "0", WIFI_UI_ACCENT);
+    wifiUiFooter("CAPTURE RUNNING", "BACK: CANCEL");
 
     // Setup promiscuo
     WiFi.mode(WIFI_MODE_NULL);
@@ -267,28 +259,26 @@ static bool runProbeCaptureFase() {
 
         // Progress bar
         float p = (float)(millis() - start) / (SCAN_TIME_S * 1000.0f);
-        int fw = (int)((barW - 2) * p);
-        tft.fillRect(barX + 1, barY + 1, fw, barH - 2, UI_SELECT);
+        wifiUiProgress(10, 113, 300, 12, (int)(p * 100.0f), WIFI_UI_OK);
 
         // Counter
         if (scanCount != lastDrawnCount) {
-            tft.fillRect(10, 135, 300, 78, TFT_BLACK);
-            drawStringCustom(10, 135, "SSIDs unicos: ", UI_MAIN, 1);
-            drawStringCustom(10, 150, String(scanCount), TFT_GREEN, 3);
-
-            drawStringCustom(150, 135, "Probes total:", UI_MAIN, 1);
-            drawStringCustom(150, 150, String((int)scanProbeTotal),
-                             TFT_CYAN, 2);
+            tft.fillRect(18, 155, 128, 17, WIFI_UI_PANEL);
+            drawStringBig(18, 155, String(scanCount), WIFI_UI_OK, 1);
+            tft.fillRect(173, 155, 128, 17, WIFI_UI_PANEL);
+            drawStringBig(173, 155, String((int)scanProbeTotal),
+                          WIFI_UI_ACCENT, 1);
 
             // Mostrar últimos 2 SSIDs como preview
             if (scanCount > 0) {
                 int show = scanCount > 2 ? 2 : scanCount;
-                int yPreview = 195;
-                drawStringCustom(10, yPreview, "Ultimos:", UI_ACCENT, 1);
+                int yPreview = 181;
+                tft.fillRect(10, 178, 300, 24, WIFI_UI_BG);
+                drawStringCustom(14, yPreview, "LATEST", WIFI_UI_MUTED, 1);
                 for (int i = 0; i < show; i++) {
                     int realIdx = scanCount - 1 - i;
                     String s = String(scanSSIDs[realIdx]);
-                    drawStringFit(75, yPreview + i * 10, s, UI_MAIN, 235, 1);
+                    drawStringFit(70, yPreview + i * 10, s, WIFI_UI_TEXT, 232, 1);
                     // No podemos dibujar ahí, ya está fuera del área limpia
                 }
             }
@@ -323,48 +313,41 @@ static bool runProbeCaptureFase() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawAttackFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
-
-    drawStringBig(10, 8, "KARMA ACTIVE", TFT_RED, 1);
-    drawStringCustom(220, 12, "[FASE 2/2]", TFT_GREEN, 1);
-    tft.drawFastHLine(0, 32, 320, TFT_RED);
-
-    drawStringCustom(10, 42, "SSIDs falsos:", UI_ACCENT, 1);
-    drawStringCustom(170, 42, "Beacons:", UI_ACCENT, 1);
-    drawStringCustom(10, 95, "Probes captados:", UI_ACCENT, 1);
-    drawStringCustom(10, 145, "Canal actual:", UI_ACCENT, 1);
-    drawStringCustom(10, 175, "SSID transmitiendo:", UI_ACCENT, 1);
-
-    tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
+    wifiUiFrame("KARMA ACTIVE", "PHASE 2/2", WIFI_UI_DANGER);
+    wifiUiMetric(10, 49, 94, "SSIDs", "0", WIFI_UI_WARN);
+    wifiUiMetric(113, 49, 94, "BEACONS", "0", WIFI_UI_OK);
+    wifiUiMetric(216, 49, 94, "PROBES", "0", WIFI_UI_ACCENT);
+    wifiUiCard(10, 100, 300, 42, false);
+    drawStringCustom(18, 108, "CURRENT CHANNEL", WIFI_UI_MUTED, 1);
+    wifiUiCard(10, 151, 300, 48, false, WIFI_UI_DANGER);
+    drawStringCustom(18, 159, "TRANSMITTING SSID", WIFI_UI_MUTED, 1);
+    wifiUiFooter("AUTHORIZED LAB", "HOLD OK: STOP", WIFI_UI_DANGER);
 }
 
 static void drawAttackStats() {
     // SSIDs spoofeados
-    tft.fillRect(10, 55, 150, 24, TFT_BLACK);
-    drawStringCustom(10, 58, String(karmaCount), TFT_YELLOW, 3);
+    tft.fillRect(18, 69, 78, 16, WIFI_UI_PANEL);
+    drawStringBig(18, 69, String(karmaCount), WIFI_UI_WARN, 1);
 
     // Beacons
-    tft.fillRect(170, 55, 145, 24, TFT_BLACK);
-    drawStringCustom(170, 58, String((unsigned long)totalBeacons),
-                     TFT_GREEN, 2);
+    tft.fillRect(121, 69, 78, 16, WIFI_UI_PANEL);
+    drawStringBig(121, 69, String((unsigned long)totalBeacons),
+                  WIFI_UI_OK, 1);
 
     // Probes captured
-    tft.fillRect(10, 110, 200, 24, TFT_BLACK);
-    drawStringCustom(10, 113, String((unsigned long)totalProbesDuringAttack),
-                     TFT_CYAN, 2);
+    tft.fillRect(224, 69, 78, 16, WIFI_UI_PANEL);
+    drawStringBig(224, 69, String((unsigned long)totalProbesDuringAttack),
+                  WIFI_UI_ACCENT, 1);
 
     // Canal
-    tft.fillRect(120, 145, 80, 14, TFT_BLACK);
-    drawStringCustom(120, 145, "CH " + String(currentChannel), UI_MAIN, 2);
+    tft.fillRect(18, 121, 284, 14, WIFI_UI_PANEL);
+    drawStringBig(18, 121, "CH " + String(currentChannel), WIFI_UI_TEXT, 1);
 
     // SSID actual
-    tft.fillRect(10, 187, 300, 14, TFT_BLACK);
+    tft.fillRect(18, 178, 284, 14, WIFI_UI_PANEL);
     if (karmaCurrentIdx < karmaCount) {
         String s = String(karmaSSIDs[karmaCurrentIdx]);
-        drawStringFit(10, 188, s, UI_SELECT, 300, 1);
+        drawStringFit(18, 178, s, WIFI_UI_DANGER, 284, 1);
     }
 }
 
@@ -489,15 +472,8 @@ void runKarma() {
     bool hasProbes = runProbeCaptureFase();
 
     if (!hasProbes) {
-        tft.fillScreen(TFT_BLACK);
-        tft.drawRect(0, 0, 320, 240, UI_MAIN);
-        drawStringBig(20, 80, "NO PROBES CAUGHT", TFT_RED, 1);
-        drawStringCustom(20, 120, "No se capturo ningun probe.", UI_ACCENT, 1);
-        drawStringCustom(20, 134, "Causas posibles:", UI_ACCENT, 1);
-        drawStringCustom(30, 148, "- No hay celulares cerca", UI_ACCENT, 1);
-        drawStringCustom(30, 160, "- Estan conectados a redes", UI_ACCENT, 1);
-        drawStringCustom(30, 172, "- iPhones modernos no probean", UI_ACCENT, 1);
-        drawStringCustom(20, 220, "OK/BACK: Volver", UI_MAIN, 1);
+        wifiUiEmpty("KARMA", "NO PROBES CAPTURED",
+                    "NO DIRECTED REQUESTS DETECTED");
 
         while (!navEnterPressed() && !navBackPressed()) delay(20);
         beep(1500, 60);
@@ -506,27 +482,20 @@ void runKarma() {
     }
 
     // 3. Pantalla de transición + confirmación
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(80, 12, "READY", TFT_GREEN, 2);
-    tft.drawFastHLine(0, 50, 320, UI_ACCENT);
-
-    drawStringCustom(10, 60, "Captura completada.", UI_MAIN, 1);
-    drawStringCustom(10, 78, "SSIDs capturados:", UI_ACCENT, 1);
-    drawStringCustom(180, 78, String(karmaCount), TFT_GREEN, 2);
-
-    drawStringCustom(10, 110, "Comenzar a transmitir falsos", UI_MAIN, 1);
-    drawStringCustom(10, 122, "beacons para atraer dispositivos?", UI_MAIN, 1);
-
-    drawStringCustom(10, 150, "Algunos SSIDs detectados:", UI_ACCENT, 1);
+    wifiUiFrame("KARMA READY", String(karmaCount) + " SSIDs", WIFI_UI_OK);
+    wifiUiCard(10, 50, 300, 53, false, WIFI_UI_OK);
+    drawStringBig(18, 60, "CAPTURE COMPLETE", WIFI_UI_OK, 1);
+    drawStringCustom(18, 82, "REVIEW BEFORE STARTING PHASE 2",
+                     WIFI_UI_MUTED, 1);
+    wifiUiCard(10, 111, 300, 89, false);
+    drawStringCustom(18, 119, "CAPTURED SSIDs", WIFI_UI_MUTED, 1);
     int show = karmaCount > 4 ? 4 : karmaCount;
     for (int i = 0; i < show; i++) {
         String s = String(karmaSSIDs[i]);
-        drawStringFit(20, 165 + i * 12, "- " + s, UI_MAIN, 290, 1);
+        drawStringFit(20, 137 + i * 14, "- " + s, WIFI_UI_TEXT, 282, 1);
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 220, "OK: ATACAR    BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
+    wifiUiFooter("BACK: CANCEL", "OK: START PHASE 2", WIFI_UI_DANGER);
 
     while (true) {
         if (navEnterPressed()) {

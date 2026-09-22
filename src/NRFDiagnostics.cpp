@@ -8,6 +8,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SharedSpi.h"
+#include "RfUi.h"
 
 extern DisplayTFT tft;
 
@@ -138,10 +139,12 @@ static void clearDiagnosticsScreen() {
 
 static void drawTestingScreen() {
     clearDiagnosticsScreen();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringCentered(74, "NRF24 DIAGNOSTIC", TFT_CYAN, 1, FONT_BIG);
-    drawStringCentered(118, "TESTING RADIOS...", TFT_YELLOW, 2, FONT_SMALL);
-    drawStringCentered(154, "Please wait", TFT_WHITE, 1, FONT_SMALL);
+    rfUiFrame("NRF DIAGNOSTIC", "TESTING", RF_UI_ACCENT);
+    rfUiCard(20, 70, 280, 94, false);
+    drawStringCentered(91, "TESTING RADIOS", RF_UI_ACCENT, 1, FONT_BIG);
+    drawStringCentered(124, "SPI + CHIP + RF LINK", RF_UI_TEXT, 1, FONT_SMALL);
+    rfUiProgress(42, 145, 236, 8, 55, RF_UI_ACCENT);
+    rfUiFooter("HARDWARE CHECK", "PLEASE WAIT");
 }
 
 static void drawResultRow(int y, const char* name, const NrfDiagResult& result,
@@ -149,34 +152,34 @@ static void drawResultRow(int y, const char* name, const NrfDiagResult& result,
     bool ok = result.beginOk && result.chipOk;
     uint16_t color = ok ? TFT_GREEN : TFT_RED;
 
-    tft.drawRect(18, y, 284, 50, TFT_DARKGREY);
-    drawStringCustom(30, y + 9, name, TFT_WHITE, 1);
-    drawStringCustom(126, y + 9, ok ? "OK" : "FAILED", color, 2);
-    drawStringCustom(30, y + 32,
+    rfUiCard(10, y, 300, 44, false, color);
+    drawStringCustom(18, y + 7, name, RF_UI_TEXT, 1);
+    drawStringCustom(105, y + 6, ok ? "OK" : "FAILED", color, 2);
+    drawStringCustom(18, y + 27,
                      "CE:" + String(cePin) + " CSN:" + String(csnPin) +
                      " BEGIN:" + String(result.beginOk ? "OK" : "FAIL") +
                      " CHIP:" + String(result.chipOk ? "OK" : "FAIL"),
-                     TFT_WHITE, 1);
+                     RF_UI_MUTED, 1);
 }
 
 static void drawDisabledRow(int y, const char* name, uint8_t cePin, uint8_t csnPin) {
-    tft.drawRect(18, y, 284, 50, TFT_DARKGREY);
-    drawStringCustom(30, y + 9, name, TFT_WHITE, 1);
-    drawStringCustom(126, y + 9, "DISABLED", TFT_YELLOW, 2);
-    drawStringCustom(30, y + 32,
+    rfUiCard(10, y, 300, 44, false, RF_UI_LINE);
+    drawStringCustom(18, y + 7, name, RF_UI_TEXT, 1);
+    drawStringCustom(105, y + 6, "DISABLED", RF_UI_ACCENT, 2);
+    drawStringCustom(18, y + 27,
                      "CE:" + String(cePin) + " CSN:" + String(csnPin) +
                      " single NRF mode",
-                     TFT_WHITE, 1);
+                     RF_UI_MUTED, 1);
 }
 
 static void drawLinkRow(int y, const NrfLinkResult& link) {
 #if NRF2_ENABLED
     bool ok = link.tx12Ok && link.tx21Ok;
-    tft.drawRect(18, y, 284, 42, TFT_DARKGREY);
-    drawStringCustom(30, y + 8, "RF LINK", TFT_WHITE, 1);
-    drawStringCustom(126, y + 6, ok ? "OK" : "WEAK/FAIL",
+    rfUiCard(10, y, 300, 38, false, ok ? RF_UI_OK : RF_UI_ACCENT);
+    drawStringCustom(18, y + 7, "RF LINK", RF_UI_TEXT, 1);
+    drawStringCustom(105, y + 6, ok ? "OK" : "WEAK/FAIL",
                      ok ? TFT_GREEN : TFT_YELLOW, 1);
-    drawStringCustom(30, y + 26,
+    drawStringCustom(18, y + 23,
                      "1>2:" + String(link.tx12Ok ? "OK" : "FAIL") +
                      "  2>1:" + String(link.tx21Ok ? "OK" : "FAIL"),
                      TFT_WHITE, 1);
@@ -189,26 +192,27 @@ static void drawLinkRow(int y, const NrfLinkResult& link) {
 static void drawNrfDiagnostics(const NrfDiagResult& nrf1, const NrfDiagResult& nrf2,
                                const NrfLinkResult& link) {
     bool anyOk = nrf1.beginOk && nrf1.chipOk;
-
-    clearDiagnosticsScreen();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringCentered(12, "NRF24 DIAGNOSTIC", TFT_CYAN, 1, FONT_BIG);
-    tft.drawFastHLine(14, 36, 292, TFT_DARKGREY);
-
-    drawResultRow(54, "NRF1", nrf1, NRF1_CE_PIN, NRF1_CSN_PIN);
 #if NRF2_ENABLED
-    drawResultRow(116, "NRF2", nrf2, NRF2_CE_PIN, NRF2_CSN_PIN);
     anyOk = anyOk || (nrf2.beginOk && nrf2.chipOk);
-    drawLinkRow(170, link);
-#else
-    drawDisabledRow(116, "NRF2", NRF2_CE_PIN, NRF2_CSN_PIN);
 #endif
 
-    drawStringCentered(214, "SPI " + String(SCK_PIN) + "/" + String(MOSI_PIN) +
+    clearDiagnosticsScreen();
+    rfUiFrame("NRF DIAGNOSTIC", anyOk ? "RADIO OK" : "CHECK HW",
+              anyOk ? RF_UI_OK : RF_UI_DANGER);
+
+    drawResultRow(49, "NRF1", nrf1, NRF1_CE_PIN, NRF1_CSN_PIN);
+#if NRF2_ENABLED
+    drawResultRow(98, "NRF2", nrf2, NRF2_CE_PIN, NRF2_CSN_PIN);
+    drawLinkRow(147, link);
+#else
+    drawDisabledRow(98, "NRF2", NRF2_CE_PIN, NRF2_CSN_PIN);
+#endif
+
+    drawStringCentered(190, "SPI " + String(SCK_PIN) + "/" + String(MOSI_PIN) +
                        "/" + String(MISO_PIN) + "  " +
                        String(NRF_SPI_SPEED / 1000000) + "MHz  RF CH76",
-                       TFT_WHITE, 1, FONT_SMALL);
-    drawStringCentered(228, "OK: RETEST   BACK: MENU", TFT_WHITE, 1, FONT_SMALL);
+                       RF_UI_MUTED, 1, FONT_SMALL);
+    rfUiFooter("BACK: MENU", "OK: RETEST", RF_UI_ACCENT);
 }
 
 static void runNrfTestOnce() {

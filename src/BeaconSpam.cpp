@@ -5,6 +5,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 
@@ -270,13 +271,10 @@ static void sendBeacon(const char* ssid, int channel) {
 //  DISCLAIMER
 // ═══════════════════════════════════════════════════════════════════════════
 static bool showDisclaimer() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+    wifiUiFrame("BEACON SPAM", "NOTICE", WIFI_UI_WARN);
 
-    drawStringBig(30, 10, "BEACON SPAM", UI_SELECT, 2);
-    tft.drawFastHLine(0, 50, 320, UI_SELECT);
-
-    int y = 62;
+    wifiUiCard(10, 49, 300, 151, false, WIFI_UI_WARN);
+    int y = 58;
     drawStringCustom(10, y, "Transmite redes WiFi falsas", UI_MAIN, 1); y += 12;
     drawStringCustom(10, y, "que aparecen en tu lista WiFi.", UI_MAIN, 1); y += 20;
 
@@ -289,8 +287,7 @@ static bool showDisclaimer() {
 
     drawStringCustom(10, y, "Tu eres responsable del uso.", UI_MAIN, 1);
 
-    tft.drawFastHLine(0, 210, 320, UI_MAIN);
-    drawStringCustom(10, 218, "OK: ACEPTAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
+    wifiUiFooter("AUTHORIZED USE", "OK: ACCEPT", WIFI_UI_WARN);
 
     while (true) {
         if (navEnterPressed()) {
@@ -314,22 +311,17 @@ static bool showDisclaimer() {
 //  MENÚ DE SELECCIÓN DE MODO
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawModeMenuRow(int idx, bool selected) {
-    int y = 40 + idx * 26;
-    uint16_t bg = selected ? UI_SELECT : UI_BG;
-    uint16_t colMain = selected ? UI_BG : UI_MAIN;
-    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
-
-    tft.fillRect(5, y - 2, 310, 22, bg);
-    drawStringCustom(15, y + 2, MODE_NAMES[idx], colMain, 2);
-    drawStringCustom(15, y + 14, MODE_DESCS[idx], colSub, 1);
+    int y = 47 + idx * 31;
+    tft.fillRect(8, y, 303, 30, WIFI_UI_BG);
+    wifiUiCard(10, y + 1, 298, 28, selected);
+    uint16_t colMain = selected ? WIFI_UI_BG : WIFI_UI_TEXT;
+    uint16_t colSub  = selected ? WIFI_UI_PANEL : WIFI_UI_MUTED;
+    drawStringCustom(20, y + 4, MODE_NAMES[idx], colMain, 2);
+    drawStringCustom(20, y + 18, MODE_DESCS[idx], colSub, 1);
 }
 
 static void drawModeMenu(int cursor) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "BEACON SPAM", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    wifiUiFrame("BEACON SPAM", String(MODE_COUNT) + " MODES");
 
     int totalItems = MODE_COUNT;
 
@@ -337,8 +329,7 @@ static void drawModeMenu(int cursor) {
         drawModeMenuRow(i, i == cursor);
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:START   BACK/OK(H):BACK", UI_ACCENT, 1);
+    wifiUiFooter("UP/DN: MODE", "OK: START");
 }
 
 static int selectMode() {
@@ -388,54 +379,49 @@ static int selectMode() {
 //  PANTALLA DE ATAQUE
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawAttackFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_SELECT);
-    tft.drawRect(1, 1, 318, 238, UI_SELECT);
+    wifiUiFrame("BEACON SPAM", "BROADCAST", WIFI_UI_OK);
 
-    drawStringBig(10, 10, "BEACON SPAM", UI_SELECT, 1);
-    drawStringCustom(200, 16, "[BROADCAST]", TFT_GREEN, 1);
-    tft.drawFastHLine(0, 36, 320, UI_SELECT);
-
-    drawStringCustom(10, 44, "Mode: " + String(MODE_NAMES[activeMode]),
-                     UI_MAIN, 1);
+    wifiUiCard(10, 49, 300, 53, false);
+    drawStringCustom(18, 57, "MODE", WIFI_UI_MUTED, 1);
+    drawStringFit(70, 57, String(MODE_NAMES[activeMode]),
+                  WIFI_UI_TEXT, 228, 1);
 
     // Labels estáticos
-    drawStringCustom(10, 62,  "Channel:",      UI_ACCENT, 1);
-    drawStringCustom(10, 82,  "Current SSID:", UI_ACCENT, 1);
-    drawStringCustom(10, 122, "Beacons:",      UI_ACCENT, 1);
-    drawStringCustom(10, 142, "Rate:",         UI_ACCENT, 1);
+    drawStringCustom(18, 78, "CHANNEL", WIFI_UI_MUTED, 1);
+    wifiUiCard(10, 108, 145, 48, false, WIFI_UI_OK);
+    wifiUiCard(165, 108, 145, 48, false, WIFI_UI_ACCENT);
+    drawStringCustom(18, 116, "BEACONS", WIFI_UI_MUTED, 1);
+    drawStringCustom(173, 116, "RATE", WIFI_UI_MUTED, 1);
+    drawStringCustom(18, 163, "CURRENT SSID", WIFI_UI_MUTED, 1);
 
     // Activity bar frame
-    tft.drawRect(10, 170, 300, 16, UI_ACCENT);
-
-    tft.drawFastHLine(0, 210, 320, UI_SELECT);
-    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
+    wifiUiProgress(10, 189, 300, 10, 0, WIFI_UI_OK);
+    wifiUiFooter("LIVE TRANSMISSION", "HOLD OK: STOP", WIFI_UI_DANGER);
 }
 
 static void drawAttackStats(unsigned long pkts, float rate) {
     // Channel
-    tft.fillRect(80, 58, 230, 14, TFT_BLACK);
-    drawStringCustom(80, 62, "CH " + String(currentChannel), TFT_YELLOW, 1);
+    tft.fillRect(86, 73, 210, 14, WIFI_UI_PANEL);
+    drawStringCustom(86, 78, "CH " + String(currentChannel), WIFI_UI_WARN, 1);
 
     // Current SSID (puede tener emojis = más ancho, truncar visualmente)
-    tft.fillRect(10, 95, 300, 18, TFT_BLACK);
+    tft.fillRect(18, 174, 284, 12, WIFI_UI_BG);
     String s = currentSSID;
-    drawStringFit(20, 97, s, TFT_CYAN, 280, 1);
+    drawStringFit(18, 175, s, WIFI_UI_ACCENT, 284, 1);
 
     // Beacons
-    tft.fillRect(80, 118, 230, 14, TFT_BLACK);
-    drawStringCustom(80, 122, String(pkts), TFT_GREEN, 1);
+    tft.fillRect(18, 132, 128, 18, WIFI_UI_PANEL);
+    drawStringBig(18, 132, String(pkts), WIFI_UI_OK, 1);
 
     // Rate
-    tft.fillRect(80, 138, 230, 14, TFT_BLACK);
+    tft.fillRect(173, 132, 128, 18, WIFI_UI_PANEL);
     char rbuf[24];
     snprintf(rbuf, sizeof(rbuf), "%d beacons/s", (int)rate);
-    drawStringCustom(80, 142, String(rbuf), TFT_CYAN, 1);
+    drawStringBig(173, 132, String(rbuf), WIFI_UI_ACCENT, 1);
 
     // Activity bar animada
-    tft.fillRect(12, 172, 296, 12, TFT_BLACK);
-    int fillW = random(60, 290);
-    tft.fillRect(12, 172, fillW, 12, UI_SELECT);
+    int activity = random(20, 100);
+    wifiUiProgress(10, 189, 300, 10, activity, WIFI_UI_OK);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -502,7 +488,9 @@ static void runAttackLoop() {
         }
 
         // ── Update UI cada 250 ms ──────────────────────────────────────
-        if (millis() - lastStatsUpdate > 250) {
+        // Keep TFT work out of the raw-transmit hot path so the complete SSID
+        // set remains visible in nearby network lists.
+        if (millis() - lastStatsUpdate > 1000) {
             unsigned long now   = millis();
             unsigned long delta = beaconsSent - lastPktCount;
             unsigned long dt    = now - lastStatsUpdate;

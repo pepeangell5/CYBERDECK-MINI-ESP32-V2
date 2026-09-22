@@ -3,6 +3,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "SystemUi.h"
 
 extern DisplayTFT tft;
 
@@ -90,9 +91,9 @@ static void drawKey(int row, int col, bool selected) {
     int x = KB_START_X + col * (KB_KEY_W + KB_GAP);
     int y = KB_START_Y + row * (KB_KEY_H + KB_GAP);
 
-    uint16_t bg = selected ? UI_SELECT : TFT_BLACK;
-    uint16_t fg = selected ? UI_BG     : UI_MAIN;
-    uint16_t border = selected ? UI_SELECT : UI_ACCENT;
+    uint16_t bg = selected ? SYS_UI_ACCENT : SYS_UI_PANEL;
+    uint16_t fg = selected ? TFT_BLACK : SYS_UI_TEXT;
+    uint16_t border = selected ? SYS_UI_ACCENT : SYS_UI_MUTED;
 
     tft.fillRect(x, y, KB_KEY_W, KB_KEY_H, bg);
     tft.drawRect(x, y, KB_KEY_W, KB_KEY_H, border);
@@ -119,21 +120,21 @@ static void drawSpecialKey(int specialIdx, bool selected) {
 
     uint16_t bg, fg, border;
     if (selected) {
-        bg = UI_SELECT;
-        fg = UI_BG;
-        border = UI_SELECT;
+        bg = SYS_UI_ACCENT;
+        fg = TFT_BLACK;
+        border = SYS_UI_ACCENT;
     } else if (shiftLit) {
-        bg = TFT_GREEN;
-        fg = UI_BG;
-        border = TFT_GREEN;
+        bg = SYS_UI_OK;
+        fg = TFT_BLACK;
+        border = SYS_UI_OK;
     } else {
-        bg = TFT_BLACK;
-        fg = UI_MAIN;
-        border = UI_ACCENT;
+        bg = SYS_UI_PANEL;
+        fg = SYS_UI_TEXT;
+        border = SYS_UI_MUTED;
 
         // Color especial para OK y CANCEL
-        if (specialIdx == KEY_OK)     border = TFT_GREEN;
-        if (specialIdx == KEY_CANCEL) border = TFT_RED;
+        if (specialIdx == KEY_OK)     border = SYS_UI_OK;
+        if (specialIdx == KEY_CANCEL) border = SYS_UI_DANGER;
     }
 
     tft.fillRect(x, y, w, h, bg);
@@ -164,14 +165,22 @@ static void drawAllKeys() {
     }
 }
 
+static void redrawCursorMove(int oldRow, int oldCol) {
+    if (oldRow < 4) drawKey(oldRow, oldCol, false);
+    else drawSpecialKey(alphaColToSpecialCol(oldCol), false);
+
+    if (g_cursorRow < 4) drawKey(g_cursorRow, g_cursorCol, true);
+    else drawSpecialKey(alphaColToSpecialCol(g_cursorCol), true);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  TEXTBOX (donde se muestra lo que estás escribiendo)
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawTextBox() {
     // Limpiar área
-    tft.fillRect(10, 56, 300, 32, TFT_BLACK);
-    tft.drawRect(10, 56, 300, 32, UI_MAIN);
+    tft.fillRoundRect(10, 56, 300, 32, 6, SYS_UI_PANEL_2);
+    tft.drawRoundRect(10, 56, 300, 32, 6, SYS_UI_ACCENT);
 
     // Construir display string
     String display;
@@ -191,28 +200,30 @@ static void drawTextBox() {
         display = display.substring(display.length() - maxChars);
     }
 
-    drawStringCustom(15, 64, display, UI_MAIN, 2);
+    drawStringCustom(15, 64, display, SYS_UI_TEXT, 2);
 
     // Counter
     String count = String(g_buffer.length()) + "/" + String(g_maxLen);
-    drawStringCustom(260, 78, count, UI_ACCENT, 1);
+    drawStringCustom(260, 78, count, SYS_UI_ACCENT, 1);
 }
 
 static void drawHeader(const String& title, const String& subtitle) {
-    tft.fillRect(0, 0, 320, 50, TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+    tft.fillRect(0, 0, 320, 50, SYS_UI_BG);
+    tft.drawRoundRect(4, 4, 312, 232, 12, SYS_UI_ACCENT);
+    tft.fillRoundRect(9, 9, 302, 34, 8, SYS_UI_PANEL);
 
     // Title
-    drawStringBig(10, 8, title, UI_MAIN, 1);
+    drawStringBig(14, 10, title, SYS_UI_TEXT, 1);
 
-    drawStringFit(10, 30, subtitle, UI_ACCENT, 300, 1);
+    drawStringFit(14, 29, subtitle, SYS_UI_ACCENT, 290, 1);
 
-    tft.drawFastHLine(0, 50, 320, UI_ACCENT);
+    tft.drawFastHLine(10, 49, 300, SYS_UI_ACCENT);
 }
 
 static void drawFooter() {
-    tft.drawFastHLine(0, 224, 320, UI_ACCENT);
-    drawStringCustom(8, 230, "UP/DN:NAV  OK:SELECT  BACK:CANCEL", UI_ACCENT, 1);
+    tft.fillRect(8, 224, 304, 9, SYS_UI_BG);
+    drawStringCustom(13, 226, "UP/DN:NAV  OK:SELECT  BACK:CANCEL",
+                     SYS_UI_ACCENT, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -231,7 +242,7 @@ static void cursorDown() {
     }
 }
 
-    static void cursorUp() {
+static void cursorUp() {
     if (g_cursorRow > 0) {
         g_cursorRow--;
     } else {
@@ -344,22 +355,27 @@ String virtualKeyboardInput(const String& title,
 
         // UP
         if (navUpPressed() && millis() - lastBtn > 180) {
+            int oldRow = g_cursorRow;
+            int oldCol = g_cursorCol;
             cursorUp();
             beep(2100, 15);
-            drawAllKeys();
+            redrawCursorMove(oldRow, oldCol);
             lastBtn = millis();
         }
 
         // DOWN
         if (navDownPressed() && millis() - lastBtn > 180) {
+            int oldRow = g_cursorRow;
+            int oldCol = g_cursorCol;
             cursorDown();
             beep(2100, 15);
-            drawAllKeys();
+            redrawCursorMove(oldRow, oldCol);
             lastBtn = millis();
         }
 
         // OK
         if (navEnterPressed() && millis() - lastBtn > 180) {
+            bool oldShift = g_shiftActive;
             int result = executeCurrentKey();
             while (navEnterPressed() || navBackPressed()) delay(5);
             delay(50);
@@ -371,9 +387,10 @@ String virtualKeyboardInput(const String& title,
                 return "";
             }
 
-            // Continúa: redibujar todo (puede haber cambiado shift, buffer, etc.)
+            // El texto se actualiza aparte. Solo SHIFT necesita regenerar las
+            // etiquetas alfanumericas; el resto conserva las teclas.
             drawTextBox();
-            drawAllKeys();
+            if (oldShift != g_shiftActive) drawAllKeys();
             lastBtn = millis();
         }
 

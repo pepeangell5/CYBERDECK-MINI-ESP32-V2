@@ -8,6 +8,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "SystemUi.h"
 
 extern DisplayTFT tft;
 
@@ -47,6 +48,10 @@ static bool     g_isDay = true;
 
 static unsigned long g_lastWeatherFetch = 0;
 static unsigned long g_lastSecondTick = 0;
+static bool     g_loadingFrameReady = false;
+static String   g_lastClockMinute = "";
+static String   g_lastClockSecond = "";
+static String   g_lastClockDate = "";
 
 
 
@@ -401,18 +406,20 @@ static bool syncNTP() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawLoadingStep(const String& step, int progress) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(40, 20, "CLOCK & WEATHER", UI_MAIN, 1);
-    tft.drawFastHLine(0, 50, 320, UI_ACCENT);
+    if (!g_loadingFrameReady) {
+        systemUiFrame("CLOCK & WEATHER", "ONLINE SERVICE");
+        systemUiCard(16, 64, 288, 116);
+        drawStringCustom(28, 78, "PREPARANDO SERVICIOS", SYS_UI_ACCENT, 1);
+        systemUiFooter("WIFI + NTP + WEATHER", "PLEASE WAIT");
+        g_loadingFrameReady = true;
+    }
 
-    drawStringCustom(20, 100, "Cargando...", UI_ACCENT, 1);
-    drawStringBig(20, 120, step, UI_SELECT, 1);
-
-    int barX = 20, barY = 180, barW = 280, barH = 14;
-    tft.drawRect(barX, barY, barW, barH, UI_ACCENT);
-    int fw = (progress * (barW - 2)) / 100;
-    tft.fillRect(barX + 1, barY + 1, fw, barH - 2, UI_SELECT);
+    tft.fillRect(28, 103, 264, 38, SYS_UI_PANEL);
+    drawStringFit(28, 111, step, SYS_UI_TEXT, 264, 2);
+    tft.fillRect(27, 150, 266, 15, SYS_UI_PANEL);
+    systemUiProgress(28, 151, 264, 12, progress, SYS_UI_ACCENT);
+    tft.fillRect(264, 79, 28, 12, SYS_UI_PANEL);
+    drawStringRight(291, 80, String(progress) + "%", SYS_UI_AMBER, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -420,95 +427,89 @@ static void drawLoadingStep(const String& step, int progress) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawMainScreenFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    // City + day indicator (sun/moon)
-    drawStringCustom(10, 8, g_city + ", " + g_country, UI_ACCENT, 1);
-    drawStringCustom(260, 8, g_isDay ? "DIA" : "NOCHE", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 22, 320, UI_ACCENT);
-
-    // Separador entre reloj y clima
-    tft.drawFastHLine(0, 130, 320, UI_ACCENT);
-
-    // Footer
-    tft.drawFastHLine(0, 220, 320, UI_ACCENT);
-    drawStringCustom(10, 226, "BACK / OK(HOLD): EXIT", UI_ACCENT, 1);
+    systemUiFrame("CLOCK & WEATHER", g_isDay ? "DAY" : "NIGHT");
+    systemUiCard(10, 47, 300, 78);
+    systemUiCard(10, 130, 300, 76);
+    drawStringFit(19, 49, g_city + ", " + g_country,
+                  SYS_UI_ACCENT, 180, 1);
+    systemUiFooter("LIVE TIME + WEATHER", "BACK/HOLD: EXIT");
+    g_lastClockMinute = "";
+    g_lastClockSecond = "";
+    g_lastClockDate = "";
 }
 
 static void drawClock(struct tm* t) {
-    // Borrar área del reloj
-    tft.fillRect(2, 24, 316, 105, TFT_BLACK);
-
-    // Hora gigante centrada
-    String timeStr = formatHHMMSS(t);
-    int timeW = getTextWidth(timeStr, 4, FONT_BIG);
-
-    // AM/PM al lado en tamaño menor
+    String minuteStr = formatHHMM(t);
+    char secBuf[4];
+    snprintf(secBuf, sizeof(secBuf), "%02d", t->tm_sec);
+    String secondStr(secBuf);
     String ampmStr = getAmPm(t);
-    int ampmW = getTextWidth(ampmStr, 2, FONT_BIG);
-
-    // Centrado considerando hora + espacio + AM/PM
-    int totalW = timeW + 8 + ampmW;
-    int timeX = (320 - totalW) / 2;
-    int ampmX = timeX + timeW + 8;
-
-    drawStringBig(timeX, 35, timeStr, UI_MAIN, 4);
-    // AM/PM con color distinto y un poco más abajo (alineado al baseline)
-    uint16_t ampmColor = (t->tm_hour < 12) ? TFT_CYAN : TFT_ORANGE;
-    drawStringBig(ampmX, 55, ampmStr, ampmColor, 2);
-
-    // Fecha abajo
     String dateStr = formatDate(t);
-    int dateW = getTextWidth(dateStr, 1, FONT_SMALL);
-    int dateX = (320 - dateW) / 2;
-    if (dateX < 5) dateX = 5;
-    drawStringCustom(dateX, 100, dateStr, UI_ACCENT, 1);
 
-    // Año
-    char yearBuf[8];
-    snprintf(yearBuf, sizeof(yearBuf), "%d", t->tm_year + 1900);
-    int yearW = getTextWidth(String(yearBuf), 1, FONT_SMALL);
-    drawStringCustom((320 - yearW) / 2, 115, String(yearBuf), UI_ACCENT, 1);
+    // HH:MM cambia una vez por minuto; no se borra con cada segundo.
+    if (minuteStr != g_lastClockMinute) {
+        tft.fillRect(20, 62, 176, 37, SYS_UI_PANEL);
+        drawStringBig(25, 66, minuteStr, SYS_UI_TEXT, 3);
+        g_lastClockMinute = minuteStr;
+    }
+
+    // Solo este pequeño bloque se actualiza cada segundo.
+    if (secondStr != g_lastClockSecond) {
+        tft.fillRoundRect(207, 61, 84, 34, 6, SYS_UI_PANEL_2);
+        tft.drawRoundRect(207, 61, 84, 34, 6, SYS_UI_ACCENT);
+        drawStringBig(216, 67, secondStr, SYS_UI_ACCENT, 2);
+        drawStringCustom(261, 76, ampmStr,
+                         t->tm_hour < 12 ? SYS_UI_OK : SYS_UI_AMBER, 1);
+        g_lastClockSecond = secondStr;
+    }
+
+    if (dateStr != g_lastClockDate) {
+        tft.fillRect(20, 105, 280, 12, SYS_UI_PANEL);
+        String fullDate = dateStr + "  " + String(t->tm_year + 1900);
+        int dateW = getTextWidth(fullDate, 1, FONT_SMALL);
+        drawStringCustom(max(20, (320 - dateW) / 2), 107, fullDate,
+                         SYS_UI_MUTED, 1);
+        g_lastClockDate = dateStr;
+    }
 }
 
 static void drawWeather() {
-    // Borrar área del clima
-    tft.fillRect(2, 132, 316, 86, TFT_BLACK);
+    tft.fillRoundRect(11, 131, 298, 74, 7, SYS_UI_PANEL);
+    tft.drawRoundRect(10, 130, 300, 76, 7, SYS_UI_ACCENT);
 
     // Icono del clima a la izquierda
     WeatherIcon icon = weatherCodeToIcon(g_weatherCode);
-    drawWeatherIcon(48, 168, icon);
+    drawWeatherIcon(42, 165, icon);
 
     // Temperatura grande al centro-derecha
     char tempBuf[16];
     snprintf(tempBuf, sizeof(tempBuf), "%.0fC", g_tempC);
-    drawStringBig(110, 145, String(tempBuf), TFT_YELLOW, 3);
+    drawStringBig(76, 143, String(tempBuf), SYS_UI_ACCENT, 3);
 
     // Sensación térmica
     char feelsBuf[24];
     snprintf(feelsBuf, sizeof(feelsBuf), "Sensacion: %.0fC", g_feelsLikeC);
-    drawStringCustom(110, 178, String(feelsBuf), UI_MAIN, 1);
+    drawStringCustom(78, 176, String(feelsBuf), SYS_UI_TEXT, 1);
 
     // Descripción del clima
     String desc = weatherCodeToDescES(g_weatherCode);
-    drawStringCustom(110, 192, desc, UI_ACCENT, 1);
+    drawStringFit(78, 190, desc, SYS_UI_MUTED, 150, 1);
 
     // Humedad y viento (lado derecho)
     char humBuf[16];
     snprintf(humBuf, sizeof(humBuf), "%d%% hum", g_humidity);
-    drawStringCustom(245, 145, String(humBuf), TFT_CYAN, 1);
+    drawStringCustom(232, 145, String(humBuf), SYS_UI_OK, 1);
 
     char windBuf[20];
     snprintf(windBuf, sizeof(windBuf), "%.0f km/h", g_windKmh);
-    drawStringCustom(245, 159, String(windBuf), TFT_CYAN, 1);
+    drawStringCustom(232, 159, String(windBuf), SYS_UI_OK, 1);
 
     // Sunrise / sunset
     if (g_sunrise.length() > 0) {
-        drawStringCustom(245, 178, "^ " + g_sunrise, TFT_ORANGE, 1);
+        drawStringCustom(232, 178, "^ " + g_sunrise, SYS_UI_AMBER, 1);
     }
     if (g_sunset.length() > 0) {
-        drawStringCustom(245, 192, "v " + g_sunset, UI_SELECT, 1);
+        drawStringCustom(232, 192, "v " + g_sunset, SYS_UI_ACCENT, 1);
     }
 }
 
@@ -588,6 +589,8 @@ void runClockWeather() {
     while (navEnterPressed() || navBackPressed()) delay(5);
     delay(100);
 
+    g_loadingFrameReady = false;
+
     // 1. Conectar WiFi (módulo reusable)
     drawLoadingStep("Conectando WiFi...", 5);
     delay(500);
@@ -596,6 +599,10 @@ void runClockWeather() {
         // Usuario canceló o falló
         return;
     }
+
+    // El selector/teclado WiFi ocupa la pantalla completa. Fuerza la
+    // reconstrucción del loading al volver, sin alterar sus credenciales.
+    g_loadingFrameReady = false;
 
     // 2. IP geolocation
     drawLoadingStep("Detectando ubicacion...", 30);
@@ -612,12 +619,12 @@ void runClockWeather() {
     // 3. NTP sync
     drawLoadingStep("Sincronizando hora...", 55);
     if (!syncNTP()) {
-        tft.fillScreen(TFT_BLACK);
-        tft.drawRect(0, 0, 320, 240, TFT_RED);
-        drawStringBig(50, 90, "NTP FALLO", TFT_RED, 2);
-        drawStringCustom(40, 130, "No se pudo sincronizar la hora.",
-                         UI_MAIN, 1);
-        drawStringCustom(40, 220, "OK/BACK: salir", UI_MAIN, 1);
+        systemUiFrame("CLOCK & WEATHER", "NTP ERROR");
+        systemUiCard(18, 76, 284, 88, false, SYS_UI_DANGER);
+        drawStringBig(70, 91, "NTP FALLO", SYS_UI_DANGER, 2);
+        drawStringCustom(42, 132, "No se pudo sincronizar la hora.",
+                         SYS_UI_TEXT, 1);
+        systemUiFooter("REVISA TU CONEXION", "OK/BACK: EXIT");
         beep(800, 100);
         while (!navEnterPressed() && !navBackPressed()) delay(20);
         while (navEnterPressed() || navBackPressed()) delay(5);

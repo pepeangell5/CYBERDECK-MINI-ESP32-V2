@@ -14,19 +14,126 @@
 #include "Pins.h"
 #include "SharedSpi.h"
 #include "SoundUtils.h"
+#include "SystemUi.h"
 
 extern DisplayTFT tft;
 
 static HardwareSerial gpsSerial(1);
 static TinyGPSPlus gps;
+// GSV informa satélites visibles incluso antes de obtener un fix. TinyGPSPlus
+// expone por defecto los satélites usados (GGA); ambos datos son distintos.
+static TinyGPSCustom gpsGnSatView(gps, "GNGSV", 3);
+static TinyGPSCustom gpsGpSatView(gps, "GPGSV", 3);
+static TinyGPSCustom gpsGlSatView(gps, "GLGSV", 3);
+static TinyGPSCustom gpsGaSatView(gps, "GAGSV", 3);
+static TinyGPSCustom gpsGbSatView(gps, "GBGSV", 3);
 static SPIClass sdSPI(HSPI);
 static bool sdStarted = false;
 static uint32_t sdMountHz = 0;
+static bool gpsPortReady = false;
+static bool gpsAutoDetectDone = false;
+static bool gpsSignalDetected = false;
+static uint32_t gpsActiveBaud = GPS_BAUD;
+static int gpsActiveRx = GPS_RX_PIN;
+static int gpsActiveTx = GPS_TX_PIN;
+static uint32_t gpsRawBytes = 0;
+static uint32_t gpsLastByteMs = 0;
+static uint32_t gpsNmeaStarts = 0;
+static uint32_t gpsLastDetectMs = 0;
 
-static void beginGpsPort() {
-    gpsSerial.end();
-    delay(20);
-    gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+static void feedGpsByte(char c) {
+    gpsRawBytes++;
+    gpsLastByteMs = millis();
+    if (c == '$') gpsNmeaStarts++;
+    uint32_t passedBefore = gps.passedChecksum();
+    gps.encode(c);
+    if (gps.passedChecksum() > passedBefore) gpsSignalDetected = true;
+}
+
+static bool gpsNmeaLive(uint32_t maxSilenceMs = 2500) {
+    return gpsSignalDetected && gpsLastByteMs > 0 &&
+           millis() - gpsLastByteMs <= maxSilenceMs;
+}
+
+static void startGpsUart(uint32_t baud, int rxPin, int txPin) {
+    if (gpsPortReady) gpsSerial.end();
+    delay(25);
+    pinMode(rxPin, INPUT_PULLUP);
+    gpsSerial.setRxBufferSize(2048);
+    gpsSerial.begin(baud, SERIAL_8N1, rxPin, txPin);
+    gpsSerial.setTimeout(10);
+    gpsActiveBaud = baud;
+    gpsActiveRx = rxPin;
+    gpsActiveTx = txPin;
+    gpsPortReady = true;
+    delay(35);
+    while (gpsSerial.available()) feedGpsByte((char)gpsSerial.read());
+}
+
+static bool probeGpsUart(uint32_t baud, int rxPin, int txPin,
+                         uint32_t windowMs = 850) {
+    startGpsUart(baud, rxPin, txPin);
+    uint32_t charsBefore = gps.charsProcessed();
+    uint32_t passedBefore = gps.passedChecksum();
+    uint32_t startsBefore = gpsNmeaStarts;
+    uint32_t rawBefore = gpsRawBytes;
+    uint32_t start = millis();
+
+    while (millis() - start < windowMs) {
+        while (gpsSerial.available()) feedGpsByte((char)gpsSerial.read());
+        delay(2);
+    }
+
+    uint32_t rawDelta = gpsRawBytes - rawBefore;
+    uint32_t charDelta = gps.charsProcessed() - charsBefore;
+    uint32_t passedDelta = gps.passedChecksum() - passedBefore;
+    uint32_t startsDelta = gpsNmeaStarts - startsBefore;
+    bool valid = passedDelta > 0 ||
+                 (rawDelta >= 40 && charDelta >= 40 && startsDelta >= 2);
+
+    Serial.printf("[GPS] probe RX:%d TX:%d baud:%lu raw:%lu chars:%lu nmea:%lu checksum:%lu %s\n",
+                  rxPin, txPin, (unsigned long)baud,
+                  (unsigned long)rawDelta, (unsigned long)charDelta,
+                  (unsigned long)startsDelta, (unsigned long)passedDelta,
+                  valid ? "OK" : "NO");
+    return valid;
+}
+
+static bool autoDetectGpsPort() {
+    static const uint32_t bauds[] = { GPS_BAUD, 38400, 115200, 4800, 57600 };
+    static const int pinMaps[][2] = {
+        { GPS_RX_PIN, GPS_TX_PIN },
+        // Prueba segura de cableado invertido: RX alternativo sin habilitar
+        // una salida TX que podría enfrentarse eléctricamente al TX del GPS.
+        { GPS_TX_PIN, -1 }
+    };
+
+    gpsLastDetectMs = millis();
+    gpsSignalDetected = false;
+    for (uint8_t pins = 0; pins < 2 && !gpsSignalDetected; pins++) {
+        for (uint8_t rate = 0; rate < sizeof(bauds) / sizeof(bauds[0]); rate++) {
+            if (probeGpsUart(bauds[rate], pinMaps[pins][0], pinMaps[pins][1])) {
+                gpsSignalDetected = true;
+                break;
+            }
+        }
+    }
+
+    gpsAutoDetectDone = true;
+    if (!gpsSignalDetected) {
+        // Mantener el cableado documentado escuchando; si el módulo tarda en
+        // arrancar, las herramientas podrán recibirlo sin volver a reiniciar.
+        startGpsUart(GPS_BAUD, GPS_RX_PIN, GPS_TX_PIN);
+    }
+    return gpsSignalDetected;
+}
+
+static void beginGpsPort(bool detect = false) {
+    if (!gpsPortReady) startGpsUart(GPS_BAUD, GPS_RX_PIN, GPS_TX_PIN);
+    if (detect && (!gpsAutoDetectDone ||
+        (!gpsSignalDetected && millis() - gpsLastDetectMs > 10000))) {
+        autoDetectGpsPort();
+    }
 }
 
 void initPeripherals() {
@@ -39,9 +146,10 @@ void initPeripherals() {
 }
 
 static void drainGps(unsigned long ms) {
+    beginGpsPort();
     unsigned long start = millis();
     while (millis() - start < ms) {
-        while (gpsSerial.available()) gps.encode(gpsSerial.read());
+        while (gpsSerial.available()) feedGpsByte((char)gpsSerial.read());
         delay(2);
     }
 }
@@ -109,12 +217,8 @@ static bool sdFileHasData(const char* path) {
 }
 
 static void drawToolFrame(const char* title) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, title, TFT_WHITE, 1);
-    tft.drawFastHLine(0, 34, 320, TFT_WHITE);
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-    drawStringCustom(10, 222, "BACK/OK: RETURN", TFT_WHITE, 1);
+    systemUiFrame(title, "LIVE TOOL");
+    systemUiFooter("BACK/OK: RETURN", "SYSTEM");
 }
 
 static String gpsField(bool valid, const String& value) {
@@ -127,6 +231,22 @@ static bool gpsFreshFix(uint32_t maxAgeMs = 5000) {
 
 static int gpsSatCount() {
     return gps.satellites.isValid() ? gps.satellites.value() : 0;
+}
+
+static int gpsSatellitesInView() {
+    int combined = atoi(gpsGnSatView.value());
+    if (combined > 0) return combined;
+    int total = atoi(gpsGpSatView.value()) + atoi(gpsGlSatView.value()) +
+                atoi(gpsGaSatView.value()) + atoi(gpsGbSatView.value());
+    return constrain(total, 0, 99);
+}
+
+static String gpsPortText() {
+    String out = "RX:" + String(gpsActiveRx);
+    if (gpsActiveTx >= 0) out += " TX:" + String(gpsActiveTx);
+    else out += " RX-ONLY";
+    out += " " + String(gpsActiveBaud);
+    return out;
 }
 
 static String gpsUtcStamp() {
@@ -274,9 +394,11 @@ static void runGpsStats() {
         drainGps(90);
         if (millis() - lastDraw > 350) {
             tft.fillRect(10, 48, 300, 158, TFT_BLACK);
-            drawStringCustom(12, 54, "Satellites: " +
+            drawStringCustom(12, 54, "Sat used: " +
                 gpsField(gps.satellites.isValid(), String(gps.satellites.value())),
                 TFT_WHITE, 2);
+            drawStringCustom(205, 58, "View:" + String(gpsSatellitesInView()),
+                             TFT_CYAN, 1);
             drawStringCustom(12, 84, "HDOP: " +
                 gpsField(gps.hdop.isValid(), String(gps.hdop.hdop(), 1)),
                 TFT_WHITE, 1);
@@ -286,8 +408,7 @@ static void runGpsStats() {
                 TFT_GREEN, 1);
             drawStringCustom(12, 140, "Checksum fail: " + String(gps.failedChecksum()),
                 gps.failedChecksum() ? TFT_YELLOW : TFT_WHITE, 1);
-            drawStringCustom(12, 164, "UART RX:" + String(GPS_RX_PIN) +
-                " TX:" + String(GPS_TX_PIN) + " " + String(GPS_BAUD), TFT_CYAN, 1);
+            drawStringCustom(12, 164, "UART " + gpsPortText(), TFT_CYAN, 1);
             if (gps.charsProcessed() == 0 && millis() - screenStart > 3000) {
                 drawStringCustom(12, 182, "Sin NMEA: cable TX/VCC/GND o baud", TFT_YELLOW, 1);
             }
@@ -307,7 +428,7 @@ static void runGpsFixAssist() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS FIX ASSIST");
-    drawStringCustom(8, 222, "BACK:EXIT  OK:RESET TIMER", TFT_WHITE, 1);
+    systemUiFooter("BACK: EXIT", "OK: RESET TIMER");
     beep(1800, 25);
 
     unsigned long sessionStart = millis();
@@ -360,14 +481,15 @@ static void runGpsFixAssist() {
 
             drawStringCustom(12, 76, "FIX", TFT_CYAN, 1);
             drawStringBig(64, 72, fix ? "LOCK" : "WAIT", fix ? TFT_GREEN : TFT_YELLOW, 1);
-            drawStringCustom(138, 76, "SAT:" + String(sats), TFT_WHITE, 1);
-            drawStringCustom(210, 76, "HDOP:" + gpsHdopText(), TFT_WHITE, 1);
+            drawStringCustom(138, 76, "U:" + String(sats) +
+                " V:" + String(gpsSatellitesInView()), TFT_WHITE, 1);
+            drawStringCustom(232, 76, "H:" + gpsHdopText(), TFT_WHITE, 1);
 
             drawGpsQualityBar(12, 104, 132, 10, gpsQualityScore());
             drawStringCustom(154, 102, "AGE " + gpsAgeText(), TFT_CYAN, 1);
 
             if (!hasNmea && elapsedSec > 3) {
-                drawStringFit(12, 128, "No NMEA: check GPS TX->GPIO18, VCC, GND, baud 9600.",
+                drawStringFit(12, 128, "No NMEA: GPS TX->RX pin, VCC, GND or baud incorrect.",
                               TFT_RED, 296, 1);
             } else if (hasNmea && !fix && elapsedSec < 180) {
                 drawStringFit(12, 128, "GPS is talking. Go outdoors; cold fix may take 1-5 min.",
@@ -380,8 +502,7 @@ static void runGpsFixAssist() {
                               TFT_GREEN, 296, 1);
             }
 
-            drawStringCustom(12, 154, "RX:" + String(GPS_RX_PIN) +
-                " TX:" + String(GPS_TX_PIN) + " BAUD:" + String(GPS_BAUD), TFT_WHITE, 1);
+            drawStringCustom(12, 154, gpsPortText(), TFT_WHITE, 1);
             drawStringCustom(12, 174, "Chars this screen: " + String(newChars), TFT_WHITE, 1);
             if (gps.location.isValid()) {
                 drawStringFit(12, 192,
@@ -403,7 +524,7 @@ static void runGpsConsole() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS NMEA");
-    drawStringCustom(10, 222, "BACK: RETURN", TFT_WHITE, 1);
+    systemUiFooter("LIVE NMEA STREAM", "BACK: RETURN");
     beep(1800, 25);
 
     char lines[8][39] = {};
@@ -425,7 +546,7 @@ static void runGpsConsole() {
         bool got = false;
         while (gpsSerial.available()) {
             char c = (char)gpsSerial.read();
-            gps.encode(c);
+            feedGpsByte(c);
             got = true;
             if (c == '\n' || c == '\r') {
                 if (pos > 0) {
@@ -450,7 +571,7 @@ static void runGpsNmeaLogger() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("NMEA LOG SD");
-    drawStringCustom(8, 222, "BACK:STOP  OK(H):STOP", TFT_WHITE, 1);
+    systemUiFooter("LOGGING TO MICROSD", "BACK/HOLD: STOP");
     beep(1800, 25);
 
     bool sdOk = sdWriteTextFile("/GPS_NMEA.txt", "CYBERDECK GPS NMEA RAW\r\n");
@@ -465,7 +586,7 @@ static void runGpsNmeaLogger() {
     while (!exitTool) {
         while (gpsSerial.available()) {
             char c = (char)gpsSerial.read();
-            gps.encode(c);
+            feedGpsByte(c);
             chunk += c;
             bytes++;
             if (c == '\n') lines++;
@@ -495,7 +616,7 @@ static void runGpsNmeaLogger() {
                 " HDOP:" + gpsHdopText() + " Fix:" + String(gpsFreshFix() ? "YES" : "NO"),
                 TFT_WHITE, 1);
             if (bytes == 0 && millis() - start > 3000) {
-                drawStringFit(12, 176, "No NMEA yet: check TX->GPIO18, VCC/GND and 9600 baud.",
+                drawStringFit(12, 176, "No NMEA: check GPS TX->RX pin, power and common GND.",
                               TFT_YELLOW, 296, 1);
             } else {
                 drawStringFit(12, 176, "Leave outdoors, antenna up, then inspect this file.",
@@ -554,7 +675,7 @@ static void drawGpsDashboardBody(const char* statusLine = nullptr) {
     drawStringFit(202, 136, gpsUtcStamp(), TFT_WHITE, 108, 1);
 
     if (gps.charsProcessed() == 0) {
-        drawStringFit(12, 164, "No NMEA yet: check GPS power, TX->GPIO18 and baud",
+        drawStringFit(12, 164, "No NMEA: check power, common GND and GPS TX->RX pin",
                       TFT_YELLOW, 296, 1);
     } else if (!fix) {
         drawStringFit(12, 164, "Waiting for fresh fix. Try outdoors or near a window.",
@@ -574,7 +695,7 @@ static void runGpsProDashboard() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS PRO");
-    drawStringCustom(8, 222, "OK:MARK  BACK/OK(H):EXIT", TFT_WHITE, 1);
+    systemUiFooter("OK: SAVE MARK", "BACK/HOLD: EXIT");
     beep(1800, 25);
 
     unsigned long lastDraw = 0;
@@ -641,7 +762,7 @@ static void runGpsCompass() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS COMPASS");
-    drawStringCustom(8, 222, "BACK/OK(H):EXIT", TFT_WHITE, 1);
+    systemUiFooter("GPS MOVEMENT COURSE", "BACK/HOLD: EXIT");
     beep(1800, 25);
 
     unsigned long lastDraw = 0;
@@ -687,7 +808,7 @@ static void runGpsTrackLogger() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS LOGGER");
-    drawStringCustom(8, 222, "OK:START/PAUSE  UP/DN:RATE  BACK", TFT_WHITE, 1);
+    systemUiFooter("OK: START/PAUSE  UP/DN: RATE", "BACK: EXIT");
     beep(1800, 25);
 
     const int intervals[] = { 1, 2, 5, 10, 30 };
@@ -777,7 +898,7 @@ static void runGpsWaypointMarker() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS MARK");
-    drawStringCustom(8, 222, "OK:SAVE MARK  BACK/OK(H):EXIT", TFT_WHITE, 1);
+    systemUiFooter("OK: SAVE WAYPOINT", "BACK/HOLD: EXIT");
     beep(1800, 25);
 
     unsigned long lastDraw = 0;
@@ -901,7 +1022,7 @@ static void runWardrivingLogger() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("WARDRIVING");
-    drawStringCustom(8, 222, "OK:START/PAUSE  UP/DN:RATE  BACK", TFT_WHITE, 1);
+    systemUiFooter("OK: START/PAUSE  UP/DN: RATE", "BACK: EXIT");
     beep(1800, 25);
 
     const int intervals[] = { 10, 20, 30, 60 };
@@ -991,7 +1112,37 @@ static void runWardrivingLogger() {
 }
 
 void runGpsTools() {
-    beginGpsPort();
+    bool needsProbe = !gpsAutoDetectDone ||
+                      (!gpsSignalDetected && millis() - gpsLastDetectMs > 10000);
+    if (needsProbe) {
+        drawToolFrame("GPS AUTO DETECT");
+        systemUiFooter("UART HARDWARE PROBE", "PLEASE WAIT");
+        systemUiCard(18, 68, 284, 102);
+        drawStringCustom(34, 86, "Buscando flujo NMEA...", SYS_UI_ACCENT, 2);
+        drawStringCustom(34, 120, "Prueba RX18/RX17 y baud comunes", SYS_UI_TEXT, 1);
+        systemUiProgress(34, 145, 252, 10, 35, SYS_UI_ACCENT);
+        beginGpsPort(true);
+
+        tft.fillRect(24, 78, 272, 82, SYS_UI_PANEL);
+        if (gpsSignalDetected) {
+            drawStringCustom(42, 88, "NMEA DETECTADO", SYS_UI_OK, 2);
+            String port = "RX:" + String(gpsActiveRx);
+            if (gpsActiveTx >= 0) port += " TX:" + String(gpsActiveTx);
+            else port += " RX-ONLY";
+            port += "  " + String(gpsActiveBaud) + " baud";
+            drawStringCustom(42, 122, port, SYS_UI_TEXT, 1);
+            systemUiProgress(34, 145, 252, 10, 100, SYS_UI_OK);
+            beep(2400, 40); delay(30); beep(3000, 60);
+        } else {
+            drawStringCustom(58, 88, "SIN NMEA", SYS_UI_DANGER, 2);
+            drawStringCustom(30, 122, "Escuchando RX18 a 9600 para reintento", SYS_UI_TEXT, 1);
+            drawStringCustom(30, 140, "GPS TX -> GPIO18, GND comun, cielo abierto", SYS_UI_AMBER, 1);
+            beep(900, 80);
+        }
+        delay(900);
+    } else {
+        beginGpsPort();
+    }
     static const char* gpsItems[] = {
         "Dashboard Pro",
         "Fix Assist",
@@ -1009,7 +1160,9 @@ void runGpsTools() {
 
     bool exitSub = false;
     while (!exitSub) {
-        int choice = runSubMenu("GPS TOOLS PRO", gpsItems, sizeof(gpsItems) / sizeof(char*));
+        int choice = runSystemSubMenu("GPS TOOLS PRO", gpsItems,
+                                      sizeof(gpsItems) / sizeof(char*),
+                                      SystemSubMenuStyle::GPS);
         switch (choice) {
             case -1: exitSub = true;  break;
             case  0: runGpsProDashboard(); break;
@@ -1032,41 +1185,78 @@ void runGpsStatus() {
     while (isEnterPressed() || isBackPressed()) delay(5);
     beginGpsPort();
     drawToolFrame("GPS STATUS");
+    systemUiFooter("OK: AUTO DETECT", "BACK/HOLD: EXIT");
     beep(1800, 25);
 
     unsigned long lastDraw = 0;
-    unsigned long screenStart = millis();
-    while (!isEnterPressed() && !isBackPressed()) {
-        drainGps(80);
+    bool exitTool = false;
+    while (!exitTool) {
+        drainGps(55);
+
+        NavAction action = readNavAction(120);
+        if (action == NAV_BACK || isBackPressed()) {
+            exitTool = true;
+        } else if (action == NAV_ENTER) {
+            bool held = waitOkReleaseWasLong();
+            if (held) {
+                exitTool = true;
+            } else {
+                tft.fillRect(8, 42, 304, 166, TFT_BLACK);
+                drawStringCustom(42, 100, "AUTODETECTANDO UART GPS...",
+                                 SYS_UI_ACCENT, 1);
+                autoDetectGpsPort();
+                drawToolFrame("GPS STATUS");
+                systemUiFooter("OK: AUTO DETECT", "BACK/HOLD: EXIT");
+                lastDraw = 0;
+                flushNavInput(80);
+            }
+        }
+
         if (millis() - lastDraw > 300) {
             tft.fillRect(10, 48, 300, 158, TFT_BLACK);
-            drawStringCustom(12, 52, "UART1 RX:" + String(GPS_RX_PIN) +
-                " TX:" + String(GPS_TX_PIN), TFT_CYAN, 1);
-            drawStringCustom(12, 72, "Chars: " + String(gps.charsProcessed()),
-                gps.charsProcessed() ? TFT_WHITE : TFT_YELLOW, 1);
-            drawStringCustom(12, 90, "Satellites: " +
+            bool nmeaLive = gpsNmeaLive();
+            bool fix = gpsFreshFix(10000);
+            drawStringCustom(12, 52, "NMEA", SYS_UI_ACCENT, 1);
+            drawStringCustom(66, 48, nmeaLive ? "LIVE" : "NO DATA",
+                             nmeaLive ? SYS_UI_OK : SYS_UI_DANGER, 2);
+            drawStringCustom(178, 52, gpsPortText(), SYS_UI_TEXT, 1);
+
+            drawStringCustom(12, 78, "Baud: " + String(gpsActiveBaud), SYS_UI_TEXT, 1);
+            drawStringCustom(116, 78, "Raw: " + String(gpsRawBytes), SYS_UI_TEXT, 1);
+            drawStringCustom(220, 78, "$NMEA:" + String(gpsNmeaStarts), SYS_UI_TEXT, 1);
+            drawStringCustom(12, 98, "Checksum OK:" + String(gps.passedChecksum()) +
+                "  BAD:" + String(gps.failedChecksum()),
+                gps.passedChecksum() ? SYS_UI_OK : SYS_UI_AMBER, 1);
+
+            drawStringCustom(12, 122, "Used: " +
                 (gps.satellites.isValid() ? String(gps.satellites.value()) : String("--")),
-                TFT_WHITE, 1);
-            drawStringCustom(12, 108, "Fix: " +
-                String(gps.location.isValid() ? "YES" : "NO"), gps.location.isValid() ? TFT_GREEN : TFT_RED, 1);
-            if (gps.location.isValid()) {
-                drawStringCustom(12, 128, "Lat: " + String(gps.location.lat(), 6), TFT_WHITE, 1);
-                drawStringCustom(12, 146, "Lng: " + String(gps.location.lng(), 6), TFT_WHITE, 1);
-            }
-            if (gps.time.isValid()) {
-                char buf[20];
-                snprintf(buf, sizeof(buf), "%02d:%02d:%02d UTC",
-                         gps.time.hour(), gps.time.minute(), gps.time.second());
-                drawStringCustom(12, 166, "Time: " + String(buf), TFT_WHITE, 1);
-            }
-            if (gps.charsProcessed() == 0 && millis() - screenStart > 3000) {
-                drawStringCustom(12, 188, "Sin datos UART: revisa VCC/GND/TX->GPIO18",
-                    TFT_YELLOW, 1);
+                SYS_UI_TEXT, 1);
+            drawStringCustom(82, 122, "View: " + String(gpsSatellitesInView()), SYS_UI_TEXT, 1);
+            drawStringCustom(156, 122, "HDOP: " + gpsHdopText(), SYS_UI_TEXT, 1);
+            drawStringCustom(240, 122, fix ? "FIX" : "WAIT",
+                             fix ? SYS_UI_OK : SYS_UI_AMBER, 1);
+
+            if (fix) {
+                drawStringCustom(12, 146, "Lat: " + String(gps.location.lat(), 6), SYS_UI_TEXT, 1);
+                drawStringCustom(12, 164, "Lng: " + String(gps.location.lng(), 6), SYS_UI_TEXT, 1);
+                drawStringCustom(12, 186, "FIX AGE: " + gpsAgeText(), SYS_UI_OK, 1);
+            } else if (nmeaLive) {
+                drawStringFit(12, 150, "GPS conectado. Esperando fix: usa cielo abierto, antena arriba.",
+                              SYS_UI_AMBER, 296, 1);
+                drawStringCustom(12, 174, "Cold start puede tardar varios minutos.", SYS_UI_MUTED, 1);
+            } else {
+                drawStringFit(12, 150,
+                    "Sin NMEA. Conecta TX del GPS al GPIO" + String(gpsActiveRx) + ".",
+                    SYS_UI_DANGER, 296, 1);
+                drawStringCustom(12, 174, "Verifica VCC y GND comun. OK vuelve a detectar.",
+                                 SYS_UI_MUTED, 1);
             }
             lastDraw = millis();
         }
+        delay(8);
     }
     while (isEnterPressed() || isBackPressed()) delay(5);
+    flushNavInput(80);
 }
 
 void runSdStatus() {
@@ -1175,16 +1365,13 @@ static bool looksTextFile(const char* path) {
 
 static constexpr int SD_BROWSER_VISIBLE = 6;
 static constexpr int SD_BROWSER_ROW_H = 24;
-static constexpr int SD_BROWSER_LIST_Y = 54;
+static constexpr int SD_BROWSER_LIST_Y = 68;
 
 static void drawSdBrowserFrame(const char* path) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, "MICROSD FILES", TFT_WHITE, 1);
-    drawStringFit(10, 36, String(path), TFT_CYAN, 300, 1);
-    tft.drawFastHLine(0, 50, 320, TFT_WHITE);
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-    drawStringCustom(8, 222, "OK:OPEN  OK(H)/BACK:UP  ENC:MOVE", TFT_WHITE, 1);
+    systemUiFrame("MICROSD FILES", "BROWSER");
+    tft.fillRoundRect(10, 43, 300, 22, 5, SYS_UI_PANEL_2);
+    drawStringFit(16, 49, String(path), SYS_UI_ACCENT, 286, 1);
+    systemUiFooter("ENC: MOVE  OK: OPEN", "BACK/HOLD: UP");
 }
 
 static void drawSdBrowserList(int cursor, int scroll) {
@@ -1204,12 +1391,13 @@ static void drawSdBrowserList(int cursor, int scroll) {
         if (idx >= sdEntryCount) continue;
 
         bool sel = idx == cursor;
-        uint16_t bg = sel ? TFT_WHITE : TFT_BLACK;
-        uint16_t fg = sel ? TFT_BLACK : TFT_WHITE;
-        uint16_t sub = sel ? TFT_BLACK : TFT_CYAN;
+        uint16_t bg = sel ? SYS_UI_ACCENT : SYS_UI_PANEL;
+        uint16_t fg = sel ? TFT_BLACK : SYS_UI_TEXT;
+        uint16_t sub = sel ? TFT_BLACK : SYS_UI_ACCENT;
 
         tft.fillRect(8, y - 2, 304, SD_BROWSER_ROW_H - 2, bg);
-        tft.drawRect(8, y - 2, 304, SD_BROWSER_ROW_H - 2, TFT_WHITE);
+        tft.drawRoundRect(8, y - 2, 304, SD_BROWSER_ROW_H - 2, 4,
+                          SYS_UI_ACCENT);
         String prefix = sdEntries[idx].dir ? "[D] " : "[F] ";
         drawStringFit(16, y + 3, prefix + String(sdEntries[idx].name), fg, 210, 1);
         if (!sdEntries[idx].dir) {
@@ -1225,7 +1413,7 @@ static void drawSdBrowserList(int cursor, int scroll) {
         if (barH < 8) barH = 8;
         int barY = SD_BROWSER_LIST_Y + (scroll * (trackH - barH)) /
                    (sdEntryCount - SD_BROWSER_VISIBLE);
-        tft.fillRect(315, barY, 3, barH, TFT_CYAN);
+        tft.fillRect(315, barY, 3, barH, SYS_UI_ACCENT);
     }
 }
 
@@ -1249,14 +1437,12 @@ static void showSdErrorScreen(const char* title) {
 }
 
 static void drawSdActionResult(const char* title, bool ok, const String& line1, const String& line2 = "") {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, ok ? TFT_GREEN : TFT_RED);
-    drawStringBig(10, 8, title, ok ? TFT_GREEN : TFT_RED, 1);
-    tft.drawFastHLine(0, 34, 320, ok ? TFT_GREEN : TFT_RED);
-    drawStringFit(18, 82, line1, ok ? TFT_CYAN : TFT_YELLOW, 284, 2);
-    if (line2.length()) drawStringFit(18, 128, line2, TFT_WHITE, 284, 1);
-    tft.drawFastHLine(0, 214, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    systemUiFrame(title, ok ? "COMPLETE" : "ATTENTION");
+    systemUiCard(16, 67, 288, 104, false,
+                 ok ? SYS_UI_OK : SYS_UI_DANGER);
+    drawStringFit(26, 87, line1, ok ? SYS_UI_OK : SYS_UI_DANGER, 268, 2);
+    if (line2.length()) drawStringFit(26, 132, line2, SYS_UI_TEXT, 268, 1);
+    systemUiFooter("OK/BACK: RETURN", ok ? "SAVED" : "CHECK");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
     flushNavInput();
@@ -1287,13 +1473,10 @@ static void runSdTextViewer(const char* path) {
 
     while (!exitViewer) {
         file.seek(pageStarts[page]);
-        tft.fillScreen(TFT_BLACK);
-        tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-        drawStringBig(10, 8, "FILE VIEW", TFT_WHITE, 1);
-        drawStringFit(10, 34, String(baseName(path)), TFT_CYAN, 300, 1);
-        tft.drawFastHLine(0, 50, 320, TFT_WHITE);
-        tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-        drawStringCustom(8, 222, "DN/OK:NEXT  UP:PREV  BACK", TFT_WHITE, 1);
+        systemUiFrame("FILE VIEW", "PAGE " + String(page + 1));
+        tft.fillRoundRect(10, 43, 300, 20, 5, SYS_UI_PANEL_2);
+        drawStringFit(16, 48, String(baseName(path)), SYS_UI_ACCENT, 286, 1);
+        systemUiFooter("UP/DN: PAGE", "OK:NEXT  BACK:EXIT");
 
         char line[40];
         int linePos = 0;
@@ -1303,7 +1486,7 @@ static void runSdTextViewer(const char* path) {
             if (c == '\r') continue;
             if (c == '\n' || linePos >= 38) {
                 line[linePos] = '\0';
-                drawStringFit(10, 58 + drawn * 17, String(line), TFT_WHITE, 300, 1);
+                drawStringFit(16, 69 + drawn * 15, String(line), SYS_UI_TEXT, 288, 1);
                 drawn++;
                 linePos = 0;
                 if (c != '\n') {
@@ -1318,10 +1501,10 @@ static void runSdTextViewer(const char* path) {
         }
         if (linePos > 0 && drawn < 9) {
             line[linePos] = '\0';
-            drawStringFit(10, 58 + drawn * 17, String(line), TFT_WHITE, 300, 1);
+            drawStringFit(16, 69 + drawn * 15, String(line), SYS_UI_TEXT, 288, 1);
             drawn++;
         }
-        if (drawn == 0) drawStringCustom(94, 116, "<fin de archivo>", TFT_YELLOW, 1);
+        if (drawn == 0) drawStringCustom(94, 116, "<fin de archivo>", SYS_UI_ACCENT, 1);
 
         uint32_t nextPos = file.position();
         if (page + 1 < maxPages && nextPos > pageStarts[page]) {
@@ -1488,7 +1671,8 @@ static void runSdReportViewer() {
 
     bool exitViewer = false;
     while (!exitViewer) {
-        int choice = runSubMenu("SD REPORTS", items, count);
+        int choice = runSystemSubMenu("SD REPORTS", items, count,
+                                      SystemSubMenuStyle::REPORTS);
         if (choice < 0) exitViewer = true;
         else runSdTextViewer(paths[choice]);
     }
@@ -1598,7 +1782,7 @@ static bool confirmSdCleanup() {
                   TFT_RED, 288, 1);
     drawStringFit(16, 142, "BACK: cancelar",
                   TFT_CYAN, 288, 1);
-    drawStringCustom(10, 222, "OK(HOLD): CONFIRM  BACK:CANCEL", UI_ACCENT, 1);
+    systemUiFooter("OK(HOLD): CONFIRM", "BACK: CANCEL");
 
     while (true) {
         NavAction action = readNavAction(120);
@@ -1650,8 +1834,9 @@ void runSdFileBrowser() {
 
     bool exitManager = false;
     while (!exitManager) {
-        int choice = runSubMenu("MICROSD MANAGER", managerItems,
-                                sizeof(managerItems) / sizeof(char*));
+        int choice = runSystemSubMenu("MICROSD MANAGER", managerItems,
+                                      sizeof(managerItems) / sizeof(char*),
+                                      SystemSubMenuStyle::STORAGE);
         switch (choice) {
             case -1: exitManager = true;   break;
             case  0: runSdBrowserTool();   break;
@@ -1807,15 +1992,16 @@ static String maskedBssid(const String& bssid) {
 }
 
 static void drawReportResult(const char* title, bool ok, const char* path) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, ok ? TFT_GREEN : TFT_RED);
-    drawStringBig(10, 8, title, ok ? TFT_GREEN : TFT_RED, 1);
-    tft.drawFastHLine(0, 34, 320, ok ? TFT_GREEN : TFT_RED);
-    drawStringCustom(20, 82, ok ? "Archivo guardado:" : "No se pudo guardar", TFT_WHITE, 1);
-    drawStringFit(20, 106, String(path), ok ? TFT_CYAN : TFT_YELLOW, 286, 2);
-    if (!ok) drawStringCustom(20, 148, "Revisa SD/espacio/montaje.", TFT_YELLOW, 1);
-    tft.drawFastHLine(0, 214, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    systemUiFrame(title, ok ? "EXPORTED" : "ERROR");
+    systemUiCard(18, 72, 284, 98, false,
+                 ok ? SYS_UI_OK : SYS_UI_DANGER);
+    drawStringCustom(28, 88,
+                     ok ? "Archivo guardado:" : "No se pudo guardar",
+                     SYS_UI_TEXT, 1);
+    drawStringFit(28, 109, String(path),
+                  ok ? SYS_UI_OK : SYS_UI_DANGER, 264, 2);
+    if (!ok) drawStringCustom(28, 148, "Revisa SD/espacio/montaje.", SYS_UI_MUTED, 1);
+    systemUiFooter("AUDIT REPORT", "OK/BACK: RETURN");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
 }
@@ -1823,10 +2009,16 @@ static void drawReportResult(const char* title, bool ok, const char* path) {
 static String gpsSummaryText() {
     drainGps(300);
     String out;
+    out += "UART: " + gpsPortText() + "\r\n";
+    out += "NMEA_Live: " + String(gpsNmeaLive() ? "YES" : "NO") + "\r\n";
+    out += "RawBytes: " + String(gpsRawBytes) + "\r\n";
+    out += "Checksum_OK: " + String(gps.passedChecksum()) + "\r\n";
+    out += "Checksum_BAD: " + String(gps.failedChecksum()) + "\r\n";
     out += "GPS chars: " + String(gps.charsProcessed()) + "\r\n";
     out += "Fix: " + String(gps.location.isValid() ? "YES" : "NO") + "\r\n";
     out += "Satellites: " +
            String(gps.satellites.isValid() ? String(gps.satellites.value()) : String("--")) + "\r\n";
+    out += "SatellitesInView: " + String(gpsSatellitesInView()) + "\r\n";
     if (gps.location.isValid()) {
         out += "Lat: " + String(gps.location.lat(), 6) + "\r\n";
         out += "Lng: " + String(gps.location.lng(), 6) + "\r\n";
@@ -1836,11 +2028,11 @@ static String gpsSummaryText() {
 }
 
 static void exportWifiAuditReport() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, "WIFI AUDIT", TFT_WHITE, 1);
-    tft.drawFastHLine(0, 34, 320, TFT_WHITE);
-    drawStringCustom(24, 98, "Escaneando redes...", TFT_CYAN, 2);
+    systemUiFrame("WIFI AUDIT", "SCANNING");
+    systemUiCard(18, 73, 284, 92);
+    drawStringCustom(46, 96, "Escaneando redes...", SYS_UI_ACCENT, 2);
+    systemUiProgress(35, 137, 250, 10, 55, SYS_UI_ACCENT);
+    systemUiFooter("BUILDING REPORT", "PLEASE WAIT");
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect(false, false);
@@ -1932,7 +2124,9 @@ void runAuditReports() {
 
     bool exitSub = false;
     while (!exitSub) {
-        int choice = runSubMenu("AUDIT REPORTS", items, sizeof(items) / sizeof(char*));
+        int choice = runSystemSubMenu("AUDIT REPORTS", items,
+                                      sizeof(items) / sizeof(char*),
+                                      SystemSubMenuStyle::REPORTS);
         switch (choice) {
             case -1: exitSub = true;          break;
             case  0: exportWifiAuditReport(); break;
@@ -1947,6 +2141,17 @@ void runMissionDashboard() {
     beginGpsPort();
     beep(1800, 25);
 
+    systemUiFrame("MISSION DASH", "REAL STATUS");
+    systemUiCard(10, 48, 300, 37);
+    systemUiCard(10, 89, 300, 37);
+    systemUiCard(10, 130, 300, 37);
+    systemUiCard(10, 171, 300, 35);
+    drawStringCustom(18, 62, "BAT", SYS_UI_ACCENT, 1);
+    drawStringCustom(18, 103, "GPS", SYS_UI_ACCENT, 1);
+    drawStringCustom(18, 144, "SD", SYS_UI_ACCENT, 1);
+    drawStringCustom(18, 183, "NRF", SYS_UI_ACCENT, 1);
+    systemUiFooter("LIVE HARDWARE", "OK/BACK: RETURN");
+
     unsigned long lastDraw = 0;
     while (!isEnterPressed() && !isBackPressed()) {
         drainGps(60);
@@ -1958,44 +2163,41 @@ void runMissionDashboard() {
             bool gpsFix = gps.location.isValid();
             int sats = gps.satellites.isValid() ? gps.satellites.value() : 0;
 
-            tft.fillScreen(TFT_BLACK);
-            tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-            drawStringBig(10, 8, "MISSION DASH", TFT_WHITE, 1);
-            drawStringCustom(222, 12, "REAL STATUS", TFT_CYAN, 1);
-            tft.drawFastHLine(0, 34, 320, TFT_WHITE);
+            // Solo se limpian las zonas de valores. El marco y las etiquetas
+            // permanecen estáticos, evitando el flash de pantalla completa.
+            tft.fillRect(52, 52, 250, 28, SYS_UI_PANEL);
+            tft.fillRect(52, 93, 250, 28, SYS_UI_PANEL);
+            tft.fillRect(52, 134, 250, 28, SYS_UI_PANEL);
+            tft.fillRect(52, 175, 250, 26, SYS_UI_PANEL);
 
-            drawStringCustom(12, 48, "BAT", TFT_CYAN, 1);
-            drawStringCustom(58, 44, String(batMv / 1000.0f, 2) + "V", batteryColor(pct), 2);
-            drawBatteryBar(168, 44, 96, 18, pct, batteryColor(pct));
-            drawStringCustom(272, 48, pct < 0 ? "--%" : String(pct) + "%", batteryColor(pct), 1);
+            uint16_t batColor = batteryColor(pct);
+            drawStringCustom(58, 57, String(batMv / 1000.0f, 2) + "V", batColor, 2);
+            drawBatteryBar(166, 57, 91, 14, pct, batColor);
+            drawStringCustom(268, 61, pct < 0 ? "--%" : String(pct) + "%", batColor, 1);
 
-            drawStringCustom(12, 82, "GPS", TFT_CYAN, 1);
-            drawStringCustom(58, 78, gpsFix ? "FIX" : "NO FIX", gpsFix ? TFT_GREEN : TFT_YELLOW, 2);
-            drawStringCustom(168, 82, "SAT:" + String(sats), TFT_WHITE, 1);
-            drawStringCustom(228, 82, "NMEA:" + String(gps.charsProcessed()), TFT_WHITE, 1);
+            drawStringCustom(58, 98, gpsFix ? "FIX" : "NO FIX",
+                             gpsFix ? SYS_UI_OK : SYS_UI_AMBER, 2);
+            drawStringCustom(168, 103, "SAT:" + String(sats), SYS_UI_TEXT, 1);
+            drawStringCustom(226, 103, "NMEA:" + String(gps.charsProcessed()), SYS_UI_TEXT, 1);
 
-            drawStringCustom(12, 116, "SD", TFT_CYAN, 1);
-            drawStringCustom(58, 112, sdOk ? "MOUNTED" : "ERROR", sdOk ? TFT_GREEN : TFT_RED, 2);
+            drawStringCustom(58, 139, sdOk ? "MOUNTED" : "ERROR",
+                             sdOk ? SYS_UI_OK : SYS_UI_DANGER, 2);
             if (sdOk) {
                 uint64_t usedMb = SD.usedBytes() / (1024ULL * 1024ULL);
                 uint64_t sizeMb = SD.cardSize() / (1024ULL * 1024ULL);
-                drawStringCustom(168, 116, String((unsigned long)usedMb) + "/" +
-                    String((unsigned long)sizeMb) + "MB", TFT_WHITE, 1);
+                drawStringCustom(168, 144, String((unsigned long)usedMb) + "/" +
+                    String((unsigned long)sizeMb) + "MB", SYS_UI_TEXT, 1);
             }
 
-            drawStringCustom(12, 150, "NRF", TFT_CYAN, 1);
 #if NRF2_ENABLED
-            drawStringCustom(58, 146, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
-                " " + String(NRF2_CE_PIN) + "/" + String(NRF2_CSN_PIN), TFT_WHITE, 1);
+            drawStringCustom(58, 180, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
+                " " + String(NRF2_CE_PIN) + "/" + String(NRF2_CSN_PIN), SYS_UI_TEXT, 1);
 #else
-            drawStringCustom(58, 146, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
-                " single module", TFT_WHITE, 1);
+            drawStringCustom(58, 180, "Pins " + String(NRF1_CE_PIN) + "/" + String(NRF1_CSN_PIN) +
+                " single module", SYS_UI_TEXT, 1);
 #endif
-            drawStringCustom(58, 164, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) +
-                "/" + String(MOSI_PIN), TFT_WHITE, 1);
-
-            tft.drawFastHLine(0, 214, 320, UI_ACCENT);
-            drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+            drawStringCustom(58, 192, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) +
+                "/" + String(MOSI_PIN), SYS_UI_MUTED, 1);
             lastDraw = millis();
         }
         delay(10);

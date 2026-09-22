@@ -10,6 +10,7 @@
 #include "PeripheralTools.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 
@@ -205,16 +206,11 @@ static uint16_t riskColor(int score) {
 }
 
 static void drawScanFrame(const char* msg) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, "THREAT MON", TFT_WHITE, 1);
-    tft.drawFastHLine(0, 34, 320, TFT_WHITE);
-    drawStringCustom(28, 96, msg, TFT_CYAN, 2);
-    drawStringCustom(28, 128, "Modo pasivo / defensivo", UI_ACCENT, 1);
+    wifiUiScanAnimationStart("THREAT MON", msg);
 }
 
 static void scanBaseline() {
-    drawScanFrame("Escaneando superficie...");
+    drawScanFrame("BUILDING DEFENSIVE BASELINE");
     memset(tmAps, 0, sizeof(tmAps));
     tmApCount = 0;
     tmOpenCount = 0;
@@ -225,7 +221,11 @@ static void scanBaseline() {
     WiFi.disconnect(false, false);
     delay(120);
 
+    WiFi.scanDelete();
+    // Keep the screen static while the radio owns the scan.  This restores the
+    // reliable scanner path and avoids repainting the complete TFT repeatedly.
     int n = WiFi.scanNetworks(false, true);
+    wifiUiScanAnimationStop();
     if (n < 0) n = 0;
     if (n > TM_MAX_APS) n = TM_MAX_APS;
 
@@ -305,9 +305,9 @@ static void threatCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 static void drawMeter(int score) {
-    int x = 270, y = 48, w = 32, h = 126;
-    tft.drawRect(x, y, w, h, UI_ACCENT);
-    tft.fillRect(x + 2, y + 2, w - 4, h - 4, TFT_BLACK);
+    int x = 276, y = 55, w = 25, h = 132;
+    tft.drawRoundRect(x, y, w, h, 5, WIFI_UI_LINE);
+    tft.fillRoundRect(x + 2, y + 2, w - 4, h - 4, 3, WIFI_UI_PANEL);
     int fillH = ((h - 4) * score) / 100;
     uint16_t col = riskColor(score);
     tft.fillRect(x + 2, y + h - 2 - fillH, w - 4, fillH, col);
@@ -318,44 +318,49 @@ static void drawThreatScreen(bool full = false) {
     uint16_t col = riskColor(score);
 
     if (full) {
-        tft.fillScreen(TFT_BLACK);
-        tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-        drawStringBig(8, 7, "THREAT MON", TFT_WHITE, 1);
-        tft.drawFastHLine(0, 34, 320, UI_ACCENT);
-        tft.drawFastHLine(0, 214, 320, UI_ACCENT);
+        wifiUiFrame("THREAT MON", tmPaused ? "PAUSED" : "LIVE",
+                    tmPaused ? WIFI_UI_WARN : WIFI_UI_OK);
+        wifiUiCard(11, 49, 253, 43, false, col);
+        wifiUiCard(11, 98, 253, 42, false);
+        wifiUiCard(11, 146, 253, 51, false,
+                   (tmLastDeauth || tmLastDisassoc) ? TFT_RED : TFT_GREEN);
     }
 
-    tft.fillRect(188, 6, 122, 22, TFT_BLACK);
-    drawStringCustom(194, 12, tmPaused ? "PAUSED" : "LIVE", tmPaused ? TFT_YELLOW : TFT_GREEN, 1);
-    drawStringCustom(250, 12, "CH" + String(tmChannel), TFT_CYAN, 1);
+    tft.fillRect(218, 12, 84, 22, WIFI_UI_PANEL);
+    drawStringCustom(224, 17, tmPaused ? "PAUSED" : "LIVE",
+                     tmPaused ? WIFI_UI_WARN : WIFI_UI_OK, 1);
+    drawStringCustom(273, 17, "CH" + String(tmChannel), WIFI_UI_ACCENT, 1);
 
-    tft.fillRect(10, 40, 250, 164, TFT_BLACK);
-    tft.fillRect(268, 46, 38, 132, TFT_BLACK);
-
-    drawStringBig(12, 44, riskLabel(score), col, 2);
-    drawStringCustom(14, 82, "SCORE:" + String(score) +
+    // Repaint only the changing interiors. Rebuilding all cards repeatedly
+    // caused the visible flash on every monitor refresh.
+    tft.drawRoundRect(11, 49, 253, 43, 7, col);
+    tft.fillRect(18, 55, 238, 30, WIFI_UI_PANEL);
+    drawStringBig(20, 57, riskLabel(score), col, 2);
+    drawStringCustom(140, 62, "SCORE " + String(score) +
         " BASE:" + String(baselineRiskScore()) +
         " LIVE:" + String(tmLiveRisk), col, 1);
     drawMeter(score);
 
-    drawStringCustom(14, 106, "APs:" + String(tmApCount) +
+    tft.fillRect(18, 104, 238, 30, WIFI_UI_PANEL);
+    drawStringCustom(19, 106, "APs:" + String(tmApCount) +
         " OPEN:" + String(tmOpenCount) +
         " WEAK:" + String(tmWeakCount), TFT_WHITE, 1);
-    drawStringCustom(14, 124, "SSID DUP:" + String(tmDuplicateSsidCount) +
-        "  BEAC/s:" + String(tmLastBeacon), UI_ACCENT, 1);
+    drawStringCustom(19, 124, "SSID DUP:" + String(tmDuplicateSsidCount) +
+        "  BEAC/s:" + String(tmLastBeacon), WIFI_UI_ACCENT, 1);
 
     uint16_t eventCol = (tmLastDeauth || tmLastDisassoc) ? TFT_RED : TFT_GREEN;
-    drawStringCustom(14, 150, "DEAUTH/s:" + String(tmLastDeauth) +
+    tft.drawRoundRect(11, 146, 253, 51, 7, eventCol);
+    tft.fillRect(18, 152, 238, 39, WIFI_UI_PANEL);
+    drawStringCustom(19, 153, "DEAUTH/s:" + String(tmLastDeauth) +
         "  DISASSOC/s:" + String(tmLastDisassoc), eventCol, 1);
-    drawStringCustom(14, 168, "BSSID/s:" + String(tmLastBeaconUniqueBssid) +
+    drawStringCustom(19, 169, "BSSID/s:" + String(tmLastBeaconUniqueBssid) +
         " SSID/s:" + String(tmLastBeaconUniqueSsid), TFT_WHITE, 1);
-    drawStringCustom(14, 186, "MGMT/s:" + String(tmLastMgmt) +
+    drawStringCustom(19, 185, "MGMT/s:" + String(tmLastMgmt) +
         " PROBE/s:" + String(tmLastProbe), TFT_WHITE, 1);
 
     String hint = tmPaused ? "OK:LIVE  UP/DN:CH  BACK/OK(H):EXIT"
                            : "OK:SAVE  UP/DN:CH  BACK/OK(H):EXIT";
-    tft.fillRect(1, 215, 318, 24, TFT_BLACK);
-    drawStringCustom(8, 222, hint, UI_ACCENT, 1);
+    wifiUiFooter(tmPaused ? "OK: LIVE" : "OK: SAVE", hint.substring(9));
 }
 
 static bool exportThreatReport() {
@@ -398,14 +403,13 @@ static bool exportThreatReport() {
 }
 
 static void showExportResult(bool ok) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, ok ? TFT_GREEN : TFT_RED);
-    drawStringBig(10, 8, ok ? "REPORT SAVED" : "SAVE ERROR", ok ? TFT_GREEN : TFT_RED, 1);
-    tft.drawFastHLine(0, 34, 320, ok ? TFT_GREEN : TFT_RED);
-    drawStringFit(20, 98, ok ? String(TM_REPORT_PATH) : "No se pudo escribir SD",
-                  ok ? TFT_CYAN : TFT_YELLOW, 280, 2);
-    tft.drawFastHLine(0, 214, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    wifiUiFrame(ok ? "REPORT SAVED" : "SAVE ERROR", "SD",
+                ok ? WIFI_UI_OK : WIFI_UI_DANGER);
+    wifiUiCard(20, 76, 280, 82, false,
+               ok ? WIFI_UI_OK : WIFI_UI_DANGER);
+    drawStringFit(32, 106, ok ? String(TM_REPORT_PATH) : "SD WRITE FAILED",
+                  ok ? WIFI_UI_OK : WIFI_UI_WARN, 256, 1);
+    wifiUiFooter("REPORT EXPORT", "OK/BACK: RETURN");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
 }
@@ -454,7 +458,6 @@ void runThreatMonitor() {
     delay(20);
     beep(2400, 45);
 
-    unsigned long lastDraw = 0;
     unsigned long lastHop = millis();
     unsigned long lastSecond = millis();
     bool exitMonitor = false;
@@ -488,11 +491,7 @@ void runThreatMonitor() {
             portEXIT_CRITICAL(&tmCounterMux);
             updateLiveRisk();
             lastSecond = now;
-        }
-
-        if (now - lastDraw > TM_DRAW_MS) {
             drawThreatScreen();
-            lastDraw = now;
         }
 
         NavAction action = readNavAction(130);

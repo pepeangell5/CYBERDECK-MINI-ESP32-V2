@@ -5,7 +5,8 @@
 #include "SoundUtils.h"
 #include "NVSStore.h"
 #include "SystemInfo.h"
-#include "AjoloteSprite.h"
+#include "SplashAxolotlAsset.h"
+#include "SystemUi.h"
 
 extern DisplayTFT tft;
 
@@ -47,11 +48,11 @@ static void drawScrollableLine(int yContent, uint16_t color) {
     tft.drawFastHLine(15, yScreen, 290, color);
 }
 
-// Ajolote a media escala (48x40). Recorta filas individuales si quedan
-// parcialmente fuera del viewport.
+// Usa exactamente el recurso RGB565 del splash. Se dibuja fila por fila para
+// respetar el clipping vertical del contenido desplazable.
 static void drawScrollableAjolote(int yContent) {
-    const int W = 48;
-    const int H = 40;
+    const int W = SPLASH_AXOLOTL_WIDTH;
+    const int H = SPLASH_AXOLOTL_HEIGHT;
     int x = (320 - W) / 2;
     int yBase = VIEWPORT_TOP + (yContent - g_scrollY);
 
@@ -59,25 +60,20 @@ static void drawScrollableAjolote(int yContent) {
     if (yBase + H < VIEWPORT_TOP) return;
     if (yBase > VIEWPORT_BOTTOM) return;
 
-    // Dibujar fila por fila, saltando las que estén fuera del viewport
-    int bytesPerRow = AJOLOTE_WIDTH / 8;
-    for (int r = 0; r < AJOLOTE_HEIGHT; r += 2) {
-        int outY = yBase + r / 2;
-        if (outY < VIEWPORT_TOP) continue;     // arriba del viewport
-        if (outY > VIEWPORT_BOTTOM) break;     // ya pasamos el viewport
+    bool previousSwapBytes = tft.getSwapBytes();
+    tft.setSwapBytes(true);
 
-        for (int byteIdx = 0; byteIdx < bytesPerRow; byteIdx++) {
-            uint8_t bits = pgm_read_byte(
-                &AJOLOTE_BMP[r * bytesPerRow + byteIdx]);
-            if (bits == 0) continue;
-            for (int bit = 0; bit < 8; bit += 2) {
-                if (bits & (0x80 >> bit)) {
-                    int outX = x + (byteIdx * 8 + bit) / 2;
-                    tft.drawPixel(outX, outY, UI_MAIN);
-                }
-            }
-        }
+    for (int r = 0; r < H; r++) {
+        int outY = yBase + r;
+        if (outY < VIEWPORT_TOP) continue;     // arriba del viewport
+        if (outY >= VIEWPORT_BOTTOM) break;    // no invadir el footer
+        const uint16_t* rowPixels =
+            SPLASH_AXOLOTL_IMAGE + r * SPLASH_AXOLOTL_WIDTH;
+        tft.pushImage(x, outY, W, 1, rowPixels,
+                      SPLASH_AXOLOTL_TRANSPARENT);
     }
+
+    tft.setSwapBytes(previousSwapBytes);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -87,39 +83,39 @@ static void drawScrollableAjolote(int yContent) {
 static void drawAboutContent() {
     // Limpiar el viewport (NO el header ni el footer)
     tft.fillRect(2, VIEWPORT_TOP, 316, VIEWPORT_BOTTOM - VIEWPORT_TOP,
-                 TFT_BLACK);
+                 SYS_UI_BG);
 
     int y = 5;   // posición Y dentro del contenido virtual
 
     // ─── Título grande ───
     String title = "ESP32-TOOLS";
     int tw = title.length() * 8 * 3;   // size 3 con FONT_BIG
-    drawScrollableText(y, (320 - tw) / 2, title, UI_MAIN, 3);
+    drawScrollableText(y, (320 - tw) / 2, title, SYS_UI_TEXT, 3);
     y += 32;
 
     // ─── Versión ───
     String version = String(FW_VERSION);
     int vw = version.length() * 6 * 2;
-    drawScrollableText(y, (320 - vw) / 2, version, UI_SELECT, 2);
+    drawScrollableText(y, (320 - vw) / 2, version, SYS_UI_ACCENT, 2);
     y += 28;
 
-    drawScrollableLine(y, UI_ACCENT);
+    drawScrollableLine(y, SYS_UI_ACCENT);
     y += 12;
 
-    // ─── Ajolote (48x40) ───
+    // ─── Mismo ajolote RGB565 del splash (96x80) ───
     drawScrollableAjolote(y);
-    y += 50;
+    y += SPLASH_AXOLOTL_HEIGHT + 10;
 
-    drawScrollableLine(y, UI_ACCENT);
+    drawScrollableLine(y, SYS_UI_ACCENT);
     y += 14;
 
     // ─── Autor ───
-    drawScrollableText(y, 70, "By PepeAngell", TFT_YELLOW, 2);
+    drawScrollableText(y, 70, "By PepeAngell", SYS_UI_ACCENT, 2);
     y += 28;
 
-    drawScrollableText(y, 30, "Jose Angel", UI_MAIN, 2);
+    drawScrollableText(y, 30, "Jose Angel", SYS_UI_TEXT, 2);
     y += 22;
-    drawScrollableText(y, 30, "Chavez Felix", UI_MAIN, 2);
+    drawScrollableText(y, 30, "Chavez Felix", SYS_UI_TEXT, 2);
     y += 28;
 
     drawScrollableText(y, 30, "Los Mochis, Sinaloa", UI_ACCENT, 1);
@@ -127,26 +123,26 @@ static void drawAboutContent() {
     drawScrollableText(y, 30, "Mexico", UI_ACCENT, 1);
     y += 18;
 
-    drawScrollableLine(y, UI_ACCENT);
+    drawScrollableLine(y, SYS_UI_ACCENT);
     y += 14;
 
     // ─── Redes sociales ───
-    drawScrollableText(y, 30, "REDES SOCIALES", UI_MAIN, 1);
+    drawScrollableText(y, 30, "REDES SOCIALES", SYS_UI_ACCENT, 1);
     y += 20;
 
     drawScrollableText(y, 30, "IG:", TFT_CYAN, 2);
-    drawScrollableText(y, 80, "@pepeangelll", UI_MAIN, 2);
+    drawScrollableText(y, 80, "@ESP32_TOOLS", SYS_UI_TEXT, 2);
     y += 26;
 
     drawScrollableText(y, 30, "FB:", 0x041F, 2);
-    drawScrollableText(y, 80, "/esp32tools", UI_MAIN, 2);
+    drawScrollableText(y, 80, "/esp32tools", SYS_UI_TEXT, 2);
     y += 26;
 
     drawScrollableText(y, 30, "GH:", 0xA81F, 2);
-    drawScrollableText(y, 80, "/pepeangell5", UI_MAIN, 2);
+    drawScrollableText(y, 80, "/pepeangell5", SYS_UI_TEXT, 2);
     y += 30;
 
-    drawScrollableLine(y, UI_ACCENT);
+    drawScrollableLine(y, SYS_UI_ACCENT);
     y += 14;
 
     // ─── Boot count ───
@@ -156,7 +152,7 @@ static void drawAboutContent() {
     drawScrollableText(y, (320 - bw) / 2, bootText, UI_ACCENT, 1);
     y += 18;
 
-    drawScrollableLine(y, UI_ACCENT);
+    drawScrollableLine(y, SYS_UI_ACCENT);
     y += 14;
 
     // ─── Quote / filosofía ───
@@ -181,20 +177,18 @@ static void drawAboutContent() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 static void drawHeader() {
-    tft.fillRect(0, 0, 320, VIEWPORT_TOP, TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringCustom(110, 10, "ABOUT", UI_MAIN, 3);
-    tft.drawFastHLine(2, VIEWPORT_TOP, 316, UI_ACCENT);
+    tft.fillRect(0, 0, 320, VIEWPORT_TOP, SYS_UI_BG);
+    tft.drawRoundRect(4, 4, 312, 232, 12, SYS_UI_ACCENT);
+    drawStringCustom(110, 10, "ABOUT", SYS_UI_TEXT, 3);
+    tft.drawFastHLine(10, VIEWPORT_TOP, 300, SYS_UI_ACCENT);
 }
 
 static void drawFooter() {
-    tft.fillRect(0, VIEWPORT_BOTTOM, 320, 240 - VIEWPORT_BOTTOM, TFT_BLACK);
-    tft.drawFastHLine(2, VIEWPORT_BOTTOM, 316, UI_ACCENT);
+    tft.fillRect(5, VIEWPORT_BOTTOM, 310, 18, SYS_UI_BG);
+    tft.drawFastHLine(10, VIEWPORT_BOTTOM, 300, SYS_UI_ACCENT);
 
     // Re-dibujar bordes laterales por si se mancharon
-    tft.drawFastVLine(0, 0, 240, UI_MAIN);
-    tft.drawFastVLine(319, 0, 240, UI_MAIN);
-    tft.drawFastHLine(0, 239, 320, UI_MAIN);
+    tft.drawRoundRect(4, 4, 312, 232, 12, SYS_UI_ACCENT);
 
     if (g_maxScroll > 0) {
         if (g_scrollY == 0) {

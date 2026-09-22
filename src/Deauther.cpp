@@ -5,6 +5,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 // ═══════════════════════════════════════════════════════════════════════════
@@ -23,7 +24,7 @@ extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg,
 // ═══════════════════════════════════════════════════════════════════════════
 #define MAX_APS             30
 #define MAX_CLIENTS         15
-#define VISIBLE_ROWS        5
+#define VISIBLE_ROWS        4
 #define AP_SCAN_TIME_S      10
 #define CLIENT_SCAN_TIME_S  15
 
@@ -115,14 +116,10 @@ static void sendDeauth(const uint8_t target[6], const uint8_t bssid[6]) {
 //  DISCLAIMER REFORZADO
 // ═══════════════════════════════════════════════════════════════════════════
 static bool showDisclaimer() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
+    wifiUiFrame("DEAUTHER", "NOTICE", WIFI_UI_DANGER);
+    wifiUiCard(10, 49, 300, 151, false, WIFI_UI_DANGER);
 
-    drawStringBig(70, 8, "DEAUTHER", TFT_RED, 2);
-    tft.drawFastHLine(0, 46, 320, TFT_RED);
-
-    int y = 54;
+    int y = 57;
     drawStringCustom(10, y, "Esta herramienta desconecta",   UI_MAIN, 1); y += 12;
     drawStringCustom(10, y, "dispositivos de su red WiFi.",  UI_MAIN, 1); y += 20;
 
@@ -137,8 +134,8 @@ static bool showDisclaimer() {
 
     drawStringCustom(10, y, "Violacion = delito federal.",    TFT_RED, 1);
 
-    tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: ENTIENDO   BACK/UP/DN: SALIR",  UI_ACCENT, 1);
+    wifiUiFooter("AUTHORIZED NETWORKS", "OK: I UNDERSTAND",
+                 WIFI_UI_DANGER);
 
     while (true) {
         if (navEnterPressed()) {
@@ -164,50 +161,18 @@ static bool showDisclaimer() {
 static void scanAPs() {
     apCount = 0;
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(10, 8, "DEAUTHER", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    drawStringCustom(10, 50, "Scanning APs...", UI_MAIN, 1);
-    drawStringCustom(10, 62, String(AP_SCAN_TIME_S) + " seconds", UI_ACCENT, 1);
-
-    int barX = 10, barY = 90, barW = 300, barH = 14;
-    tft.drawRect(barX, barY, barW, barH, UI_ACCENT);
+    wifiUiScanAnimationStart("DEAUTHER", "SEARCHING AUTHORIZED APs");
 
     // WiFi scan estándar (modo STA)
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
 
-    // Scan asíncrono
-    WiFi.scanNetworks(true, true);   // async, show_hidden
-
-    unsigned long scanStart = millis();
-    int lastCount = 0;
-
-    while (millis() - scanStart < AP_SCAN_TIME_S * 1000UL) {
-        int status = WiFi.scanComplete();
-        if (status >= 0 && status != lastCount) {
-            lastCount = status;
-        }
-
-        float progress = (float)(millis() - scanStart) / (AP_SCAN_TIME_S * 1000.0f);
-        int fillW = (int)((barW - 2) * progress);
-        tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, UI_SELECT);
-
-        tft.fillRect(10, 115, 200, 12, TFT_BLACK);
-        drawStringCustom(10, 115, "FOUND: " + String(lastCount), TFT_GREEN, 2);
-
-        delay(100);
-    }
-
-    // Esperar a que termine si aún está corriendo
-    int n = WiFi.scanComplete();
-    while (n == WIFI_SCAN_RUNNING) {
-        delay(100);
-        n = WiFi.scanComplete();
-    }
+    // A single stable frame plus the blocking scanner eliminates TFT flicker
+    // and preserves the reliable AP discovery behaviour used by this tool.
+    WiFi.scanDelete();
+    int n = WiFi.scanNetworks(false, true);
+    wifiUiScanAnimationStop();
 
     if (n < 0) n = 0;
     if (n > MAX_APS) n = MAX_APS;
@@ -250,17 +215,12 @@ static void scanAPs() {
 //  SELECCIÓN DE AP (+ Rambo + Rescan + Back)
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawAPList(int cursor, int scrollOffset) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "SELECT AP", UI_MAIN, 1);
-    drawStringCustom(230, 12, "[" + String(apCount) + " APs]", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    wifiUiFrame("SELECT AP", String(apCount) + " AP", WIFI_UI_OK);
 
     // Items: RAMBO (0), APs (1..apCount), RESCAN, BACK
     int totalItems = apCount + 2;
-    const int rowH = 32;
-    const int listY = 36;
+    const int rowH = 39;
+    const int listY = 47;
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + scrollOffset;
@@ -269,37 +229,38 @@ static void drawAPList(int cursor, int scrollOffset) {
         int y = listY + i * rowH;
         bool selected = (idx == cursor);
 
-        if (selected) tft.fillRect(5, y, 310, rowH - 2, UI_SELECT);
+        wifiUiCard(10, y + 1, 298, 35, selected,
+                   idx == 0 ? WIFI_UI_DANGER : WIFI_UI_ACCENT);
 
         uint16_t colMain = selected ? UI_BG : UI_MAIN;
         uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
 
         if (idx == 0) {
             // RAMBO MODE
-            drawStringCustom(10, y + 6,  "[!] RAMBO: ATTACK ALL APs",
+            drawStringCustom(18, y + 6,  "[!] RAMBO: ATTACK ALL APs",
                              selected ? UI_BG : TFT_RED, 2);
-            drawStringCustom(10, y + 20, "Agresivo - ver disclaimer",
+            drawStringCustom(18, y + 22, "Authorized isolated lab only",
                              colSub, 1);
         } else if (idx == apCount + 1) {
-            drawStringCustom(10, y + 10, "< RESCAN", colMain, 2);
+            drawStringCustom(18, y + 11, "< RESCAN", colMain, 2);
         } else {
             int apIdx = idx - 1;
             APInfo& a = aps[apIdx];
 
             String s = a.ssid;
             if (getTextWidth(s, 2) <= 260) {
-                drawStringCustom(10, y + 4, s, colMain, 2);
+                drawStringCustom(18, y + 4, s, colMain, 2);
             } else {
-                drawStringFit(10, y + 8, s, colMain, 260, 1);
+                drawStringFit(18, y + 8, s, colMain, 248, 1);
             }
 
             String meta = "CH" + String(a.channel) + " " +
                           String(a.rssi) + "dBm";
-            drawStringCustom(10, y + 20, meta, colSub, 1);
+            drawStringCustom(18, y + 22, meta, colSub, 1);
 
             // Bars
             int bars = rssiBars(a.rssi);
-            int bx = 285, by = 24;
+            int bx = 280, by = y + 27;
             for (int b = 0; b < 4; b++) {
                 int bh = 3 + b * 2;
                 uint16_t c = (b < bars)
@@ -314,13 +275,13 @@ static void drawAPList(int cursor, int scrollOffset) {
 
     // Scroll bar
     if (totalItems > VISIBLE_ROWS) {
-        int barH = (VISIBLE_ROWS * 176) / totalItems;
-        int barY = 36 + (scrollOffset * (176 - barH)) / (totalItems - VISIBLE_ROWS);
-        tft.fillRect(314, barY, 4, barH, UI_ACCENT);
+        int barH = max(16, (VISIBLE_ROWS * 148) / totalItems);
+        int barY = 49 + (scrollOffset * (148 - barH)) / (totalItems - VISIBLE_ROWS);
+        tft.fillRect(312, 49, 3, 148, WIFI_UI_BG);
+        tft.fillRect(312, barY, 3, barH, WIFI_UI_ACCENT);
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
+    wifiUiFooter("UP/DN: TARGET", "OK: SELECT");
 }
 
 // Devuelve:
@@ -374,14 +335,10 @@ static int selectAP() {
 //  RAMBO DISCLAIMER (extra warning)
 // ═══════════════════════════════════════════════════════════════════════════
 static bool confirmRambo() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
+    wifiUiFrame("RAMBO MODE", "WARNING", WIFI_UI_DANGER);
+    wifiUiCard(10, 49, 300, 151, false, WIFI_UI_DANGER);
 
-    drawStringBig(60, 10, "RAMBO MODE", TFT_RED, 2);
-    tft.drawFastHLine(0, 48, 320, TFT_RED);
-
-    int y = 58;
+    int y = 57;
     drawStringCustom(10, y, "Atacara TODAS las redes WiFi",   UI_MAIN, 1); y += 12;
     drawStringCustom(10, y, "cercanas simultaneamente.",       UI_MAIN, 1); y += 20;
 
@@ -395,8 +352,7 @@ static bool confirmRambo() {
 
     drawStringCustom(10, y, "Responsabilidad 100% tuya.",      TFT_YELLOW, 1);
 
-    tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: CONTINUAR   BACK/UP/DN: CANCEL", UI_ACCENT, 1);
+    wifiUiFooter("ISOLATED LAB ONLY", "OK: CONTINUE", WIFI_UI_DANGER);
 
     while (true) {
         if (navEnterPressed()) {
@@ -431,35 +387,30 @@ static void drawActionMenuRow(int idx, bool selected) {
         ""
     };
 
-    int y = 85 + idx * 32;
-    uint16_t bg = selected ? UI_SELECT : UI_BG;
+    int y = 101 + idx * 48;
     uint16_t colMain = selected ? UI_BG : UI_MAIN;
-    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
+    uint16_t colSub  = selected ? WIFI_UI_PANEL : WIFI_UI_MUTED;
 
-    tft.fillRect(5, y - 2, 310, 28, bg);
-    drawStringCustom(15, y + 2,  items[idx], colMain, 2);
+    tft.fillRect(8, y - 2, 303, 45, WIFI_UI_BG);
+    wifiUiCard(10, y - 1, 298, 42, selected,
+               idx == 0 ? WIFI_UI_DANGER : WIFI_UI_ACCENT);
+    drawStringCustom(20, y + 5, items[idx], colMain, 2);
     if (strlen(descs[idx]) > 0) {
-        drawStringCustom(15, y + 18, descs[idx], colSub, 1);
+        drawStringCustom(20, y + 24, descs[idx], colSub, 1);
     }
 }
 
 static void drawActionMenu(int cursor, const APInfo& ap) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "ACTION", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    drawStringFit(10, 38, "AP: " + ap.ssid, UI_SELECT, 300, 1);
-    drawStringCustom(10, 50, "BSSID: " + ap.bssidStr, UI_ACCENT, 1);
-    drawStringCustom(10, 62, "Channel: " + String(ap.channel) + "  RSSI: " +
-                     String(ap.rssi) + "dBm", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 75, 320, UI_ACCENT);
+    wifiUiFrame("SELECT ACTION", "DEAUTH", WIFI_UI_DANGER);
+    wifiUiCard(10, 49, 300, 43, false);
+    drawStringFit(18, 56, "AP: " + ap.ssid, WIFI_UI_TEXT, 284, 1);
+    drawStringCustom(18, 73, "CH" + String(ap.channel) + "  " +
+                     String(ap.rssi) + "dBm  " + ap.bssidStr,
+                     WIFI_UI_MUTED, 1);
 
     for (int i = 0; i < 2; i++) drawActionMenuRow(i, i == cursor);
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
+    wifiUiFooter("UP/DN: ACTION", "OK: SELECT");
 }
 
 // Devuelve: 0=broadcast, 1=scan clients, -1=back
@@ -567,18 +518,14 @@ static void scanClients(const APInfo& ap) {
     clientCount = 0;
     memcpy(scanTargetBSSID, ap.bssid, 6);
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(10, 8, "SCAN CLIENTS", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
-
-    drawStringCustom(10, 40, "AP: " + ap.ssid, UI_SELECT, 1);
-    drawStringCustom(10, 52, "CH " + String(ap.channel) +
-                             "  -  " + String(CLIENT_SCAN_TIME_S) + "s sniff",
-                     UI_ACCENT, 1);
-
-    int barX = 10, barY = 80, barW = 300, barH = 14;
-    tft.drawRect(barX, barY, barW, barH, UI_ACCENT);
+    wifiUiFrame("SCAN CLIENTS", "PASSIVE", WIFI_UI_OK);
+    wifiUiCard(10, 49, 300, 43, false);
+    drawStringFit(18, 56, "AP: " + ap.ssid, WIFI_UI_TEXT, 284, 1);
+    drawStringCustom(18, 73, "CH" + String(ap.channel) + "  PASSIVE LISTEN",
+                     WIFI_UI_MUTED, 1);
+    wifiUiProgress(10, 101, 300, 12, 0, WIFI_UI_OK);
+    wifiUiMetric(10, 123, 145, "CLIENTS", "0", WIFI_UI_OK);
+    wifiUiFooter("LISTENING", "BACK: CANCEL");
 
     // Setup promiscuous mode en el canal del AP
     WiFi.mode(WIFI_MODE_NULL);
@@ -599,26 +546,25 @@ static void scanClients(const APInfo& ap) {
     while (millis() - scanStart < CLIENT_SCAN_TIME_S * 1000UL) {
         float progress = (float)(millis() - scanStart) /
                          (CLIENT_SCAN_TIME_S * 1000.0f);
-        int fillW = (int)((barW - 2) * progress);
-        tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, UI_SELECT);
+        wifiUiProgress(10, 101, 300, 12, (int)(progress * 100.0f), WIFI_UI_OK);
 
         // Redibujar lista de clientes si cambió
         if (clientCount != lastDrawnCount) {
-            tft.fillRect(10, 105, 300, 100, TFT_BLACK);
-            drawStringCustom(10, 105, "Clients: " + String(clientCount),
-                             TFT_GREEN, 2);
+            tft.fillRect(18, 143, 128, 17, WIFI_UI_PANEL);
+            drawStringBig(18, 143, String(clientCount), WIFI_UI_OK, 1);
+            tft.fillRect(10, 166, 300, 36, WIFI_UI_BG);
 
-            int yy = 125;
+            int yy = 166;
             int show = clientCount;
-            if (show > 5) show = 5;
+            if (show > 3) show = 3;
             for (int i = 0; i < show; i++) {
                 String line = "- " + clients[i].macStr +
                               " (" + String(clients[i].rssi) + ")";
-                drawStringCustom(10, yy, line, UI_ACCENT, 1);
+                drawStringCustom(14, yy, line, WIFI_UI_ACCENT, 1);
                 yy += 12;
             }
-            if (clientCount > 5) {
-                drawStringCustom(10, yy, "...+" + String(clientCount - 5) +
+            if (clientCount > 3) {
+                drawStringCustom(14, yy, "...+" + String(clientCount - 3) +
                                  " more", UI_ACCENT, 1);
             }
 
@@ -654,46 +600,41 @@ static void scanClients(const APInfo& ap) {
 //  SELECCIÓN DE TARGET (cliente o ALL)
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawClientList(int cursor, int scrollOffset) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "SELECT TARGET", UI_MAIN, 1);
-    drawStringCustom(230, 12, "[" + String(clientCount) + " clients]",
-                     UI_ACCENT, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    wifiUiFrame("SELECT TARGET", String(clientCount) + " CLIENTS");
 
     // Items: ALL_CLIENTS (0), clients (1..clientCount), RESCAN
     int totalItems = clientCount + 2;
-    const int rowH = 28;
-    const int listY = 36;
+    const int rowH = 32;
+    const int listY = 47;
 
-    for (int i = 0; i < VISIBLE_ROWS + 1; i++) {
+    for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + scrollOffset;
         if (idx >= totalItems) break;
 
         int y = listY + i * rowH;
         bool selected = (idx == cursor);
 
-        if (selected) tft.fillRect(5, y, 310, rowH - 2, UI_SELECT);
+        wifiUiCard(10, y + 1, 298, 29, selected,
+                   idx == 0 ? WIFI_UI_DANGER : WIFI_UI_ACCENT);
 
         uint16_t colMain = selected ? UI_BG : UI_MAIN;
         uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
 
         if (idx == 0) {
-            drawStringCustom(10, y + 4, "ALL CLIENTS", colMain, 2);
-            drawStringCustom(10, y + 18, "Broadcast deauth (FF:FF:FF..)",
+            drawStringCustom(18, y + 4, "ALL CLIENTS", colMain, 2);
+            drawStringCustom(18, y + 18, "Broadcast target",
                              colSub, 1);
         } else if (idx == clientCount + 1) {
-            drawStringCustom(10, y + 7, "< RESCAN", colMain, 2);
+            drawStringCustom(18, y + 7, "< RESCAN", colMain, 2);
         } else {
             int cIdx = idx - 1;
             ClientInfo& c = clients[cIdx];
-            drawStringCustom(10, y + 4, c.macStr, colMain, 2);
-            drawStringCustom(10, y + 18, String(c.rssi) + " dBm",
+            drawStringCustom(18, y + 4, c.macStr, colMain, 2);
+            drawStringCustom(18, y + 18, String(c.rssi) + " dBm",
                              colSub, 1);
 
             int bars = rssiBars(c.rssi);
-            int bx = 280, by = 20;
+            int bx = 280, by = y + 22;
             for (int b = 0; b < 4; b++) {
                 int bh = 3 + b * 2;
                 uint16_t col = (b < bars)
@@ -706,8 +647,7 @@ static void drawClientList(int cursor, int scrollOffset) {
         }
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:DEAUTH  BACK/OK(H):BACK", UI_ACCENT, 1);
+    wifiUiFooter("UP/DN: TARGET", "OK: SELECT");
 }
 
 // Devuelve: -3=BACK, -2=RESCAN, -1=ALL, 0..clientCount-1 = client
@@ -760,60 +700,48 @@ static int selectTarget() {
 //  PANTALLA DE ATAQUE
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawAttackFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
-
-    drawStringBig(10, 10, "DEAUTHING", TFT_RED, 1);
-    drawStringCustom(225, 16, "[ACTIVE]", TFT_GREEN, 1);
-    tft.drawFastHLine(0, 36, 320, TFT_RED);
+    wifiUiFrame("DEAUTHER", "ACTIVE", WIFI_UI_DANGER);
+    wifiUiCard(10, 49, 300, 48, false, WIFI_UI_DANGER);
 
     // Info
     if (ramboMode) {
-        drawStringCustom(10, 44, "Mode:   RAMBO (all APs)", UI_MAIN, 1);
-        drawStringCustom(10, 58, "Channels: 1 / 6 / 11 hop", UI_MAIN, 1);
-        drawStringCustom(10, 72, "Targets: broadcast",       UI_MAIN, 1);
+        drawStringCustom(18, 57, "MODE: RAMBO / ALL APs", WIFI_UI_DANGER, 1);
+        drawStringCustom(18, 73, "CH 1 / 6 / 11  BROADCAST", WIFI_UI_MUTED, 1);
     } else {
         String s = activeAP.ssid;
-        drawStringFit(10, 44, "AP:     " + s, UI_MAIN, 300, 1);
+        drawStringFit(18, 57, "AP: " + s, WIFI_UI_TEXT, 282, 1);
         if (broadcastMode) {
-            drawStringCustom(10, 58, "Target: ALL (broadcast)", UI_MAIN, 1);
+            drawStringCustom(18, 73, "TARGET: ALL / BROADCAST", WIFI_UI_MUTED, 1);
         } else {
-            drawStringCustom(10, 58, "Target: " + macToStr(activeTargetMac),
-                             UI_MAIN, 1);
+            drawStringCustom(18, 73, "TARGET: " + macToStr(activeTargetMac),
+                             WIFI_UI_MUTED, 1);
         }
-        drawStringCustom(10, 72, "Channel: " + String(activeAP.channel),
-                         UI_MAIN, 1);
+        drawStringCustom(258, 73, "CH" + String(activeAP.channel),
+                         WIFI_UI_ACCENT, 1);
     }
 
-    tft.drawFastHLine(10, 86, 300, UI_ACCENT);
-
-    drawStringCustom(10, 100, "Time:",    UI_ACCENT, 1);
-    drawStringCustom(10, 128, "Packets:", UI_ACCENT, 1);
-    drawStringCustom(10, 156, "Rate:",    UI_ACCENT, 1);
-
-    tft.drawRect(10, 185, 300, 14, UI_ACCENT);
-
-    tft.drawFastHLine(0, 212, 320, TFT_RED);
-    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
+    wifiUiMetric(10, 105, 94, "TIME", "--:--", WIFI_UI_WARN);
+    wifiUiMetric(113, 105, 94, "PACKETS", "0", WIFI_UI_OK);
+    wifiUiMetric(216, 105, 94, "RATE", "0/s", WIFI_UI_ACCENT);
+    drawStringCustom(14, 158, "TRANSMISSION ACTIVITY", WIFI_UI_MUTED, 1);
+    wifiUiProgress(10, 177, 300, 14, 0, WIFI_UI_DANGER);
+    wifiUiFooter("AUTHORIZED LAB", "HOLD OK: STOP", WIFI_UI_DANGER);
 }
 
 static void drawAttackStats(unsigned long elapsed, unsigned long pkts,
                             float rate) {
-    tft.fillRect(100, 96, 210, 14, TFT_BLACK);
-    drawStringCustom(100, 100, formatTime(elapsed), TFT_YELLOW, 2);
+    tft.fillRect(18, 125, 78, 16, WIFI_UI_PANEL);
+    drawStringBig(18, 125, formatTime(elapsed), WIFI_UI_WARN, 1);
 
-    tft.fillRect(100, 124, 210, 14, TFT_BLACK);
-    drawStringCustom(100, 128, String(pkts), TFT_GREEN, 2);
+    tft.fillRect(121, 125, 78, 16, WIFI_UI_PANEL);
+    drawStringBig(121, 125, String(pkts), WIFI_UI_OK, 1);
 
-    tft.fillRect(100, 152, 210, 14, TFT_BLACK);
+    tft.fillRect(224, 125, 78, 16, WIFI_UI_PANEL);
     char rbuf[24];
     snprintf(rbuf, sizeof(rbuf), "%d pkt/s", (int)rate);
-    drawStringCustom(100, 156, String(rbuf), TFT_CYAN, 2);
+    drawStringBig(224, 125, String(rbuf), WIFI_UI_ACCENT, 1);
 
-    tft.fillRect(12, 187, 296, 10, TFT_BLACK);
-    int fillW = random(60, 290);
-    tft.fillRect(12, 187, fillW, 10, TFT_RED);
+    wifiUiProgress(10, 177, 300, 14, random(20, 100), WIFI_UI_DANGER);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

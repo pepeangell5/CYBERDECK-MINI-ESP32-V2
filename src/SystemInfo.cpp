@@ -9,6 +9,7 @@
 #include "Input.h"
 #include "SoundUtils.h"
 #include "NVSStore.h"
+#include "SystemUi.h"
 
 extern DisplayTFT tft;
 
@@ -85,21 +86,16 @@ static String formatMB(uint32_t bytes) {
 // Dibuja el marco estático (título, separadores, section headers, footer).
 // Solo se llama una vez al entrar.
 static void drawStaticLayout() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    // Header
-    drawStringBig(10, 8, "SYSTEM INFO", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    systemUiFrame("SYSTEM INFO", "LIVE METRICS");
+    systemUiCard(10, 48, 300, 31);
+    systemUiCard(10, 83, 300, 71);
+    systemUiCard(10, 158, 300, 49);
 
     // Section headers (estáticos)
-    drawStringCustom(10, 38,  "FIRMWARE",  UI_SELECT, 1);
-    drawStringCustom(10, 82,  "HARDWARE",  UI_SELECT, 1);
-    drawStringCustom(10, 158, "RUNTIME",   UI_SELECT, 1);
-
-    // Footer
-    tft.drawFastHLine(0, 218, 320, UI_ACCENT);
-    drawStringCustom(10, 225, "BACK / OK(HOLD): BACK TO MENU", UI_ACCENT, 1);
+    drawStringCustom(18, 51,  "FIRMWARE", SYS_UI_ACCENT, 1);
+    drawStringCustom(18, 86,  "HARDWARE", SYS_UI_ACCENT, 1);
+    drawStringCustom(18, 161, "RUNTIME", SYS_UI_ACCENT, 1);
+    systemUiFooter("AUTO REFRESH", "BACK/HOLD: RETURN");
 }
 
 // Dibuja la información estática (no cambia en runtime)
@@ -113,35 +109,35 @@ static void drawStaticInfo() {
     esp_read_mac(macBT,   ESP_MAC_BT);
 
     // ── FIRMWARE ────────────────────────────────────────────────────────
-    drawStringCustom(20, 50,
+    drawStringCustom(88, 51,
         "Version: " + String(FW_NAME) + " " + String(FW_VERSION),
-        UI_MAIN, 1);
-    drawStringCustom(20, 62,
+        SYS_UI_TEXT, 1);
+    drawStringCustom(88, 64,
         "Built:   " + String(__DATE__),
-        UI_ACCENT, 1);
+        SYS_UI_MUTED, 1);
 
     // ── HARDWARE ────────────────────────────────────────────────────────
-    drawStringCustom(20, 94,
+    drawStringCustom(20, 98,
         "Chip:    " + String(chipModelName(chip.model)) +
         " rev" + String(chip.revision),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 106,
+    drawStringCustom(20, 109,
         "Cores:   " + String(chip.cores) +
         "  |  " + String(ESP.getCpuFreqMHz()) + " MHz",
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 118,
+    drawStringCustom(20, 120,
         "Flash:   " + formatMB(ESP.getFlashChipSize()),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 130,
+    drawStringCustom(20, 132,
         "MAC WiFi: " + formatMAC(macWifi),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 142,
+    drawStringCustom(20, 143,
         "MAC BT:   " + formatMAC(macBT),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 }
 
 // Redibuja solo los valores dinámicos (se llama periódicamente)
@@ -157,26 +153,26 @@ static void drawDynamicInfo(unsigned long sessionStartMs) {
     if (tempC < 0 || tempC > 125) tempC = 0;
 
     // Área dinámica: y 170-212 (borrar antes de redibujar)
-    tft.fillRect(18, 170, 294, 44, TFT_BLACK);
+    tft.fillRect(18, 168, 284, 36, SYS_UI_PANEL);
 
-    drawStringCustom(20, 170,
+    drawStringCustom(20, 168,
         "Boot #:   " + String(bootCount),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 182,
+    drawStringCustom(20, 178,
         "Uptime:   " + formatUptime(uptimeMs),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
-    drawStringCustom(20, 194,
+    drawStringCustom(20, 188,
         "Heap:     " + formatKB(heapFree) + " / " + formatKB(heapTotal),
-        UI_MAIN, 1);
+        SYS_UI_TEXT, 1);
 
     if (tempC > 0) {
         char tbuf[16];
         snprintf(tbuf, sizeof(tbuf), "%.1f C", tempC);
-        drawStringCustom(20, 206, "Temp:     " + String(tbuf), UI_MAIN, 1);
+        drawStringCustom(20, 198, "Temp:     " + String(tbuf), SYS_UI_TEXT, 1);
     } else {
-        drawStringCustom(20, 206, "Temp:     --", UI_ACCENT, 1);
+        drawStringCustom(20, 198, "Temp:     --", SYS_UI_MUTED, 1);
     }
 }
 
@@ -197,7 +193,7 @@ void runSystemInfo() {
     drawDynamicInfo(sessionStart);
 
     unsigned long lastRefresh = millis();
-    const unsigned long REFRESH_MS = 500;
+    const unsigned long REFRESH_MS = 1000;
 
     bool exitScreen = false;
     unsigned long okPressStart = 0;

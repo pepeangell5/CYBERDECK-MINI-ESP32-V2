@@ -34,4 +34,14 @@ void runMainMenu();
 //   · índice 0..count-1 del item seleccionado
 int  runSubMenu(const char* title, const char* items[], int count);
 
+// Variantes visuales para las herramientas anidadas de SYSTEM. Mantienen la
+// misma navegación y únicamente cambian identidad, tarjetas e iconografía.
+enum class SystemSubMenuStyle : uint8_t {
+    GPS,
+    STORAGE,
+    REPORTS
+};
+int runSystemSubMenu(const char* title, const char* items[], int count,
+                     SystemSubMenuStyle style);
+
 #endif

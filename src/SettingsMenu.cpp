@@ -4,9 +4,11 @@
 #include "NVSStore.h"
 #include "WifiConfig.h"
 #include "SoundUtils.h"
+#include "SystemUi.h"
 
 static int cursor = 0;
 static const int MENU_ITEMS = 3;
+static bool settingsFrameReady = false;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  OLVIDAR RED WIFI · borra credenciales guardadas en NVS
@@ -18,15 +20,12 @@ static void runForgetWifi() {
 
     // Caso 1: no hay red guardada
     if (!wifiConfigHasSaved()) {
-        tft.fillScreen(TFT_BLACK);
-        tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-        drawStringCustom(30, 10, "WIFI CONFIG", TFT_WHITE, 3);
-        tft.drawFastHLine(0, 45, 320, TFT_WHITE);
-
-        drawStringCustom(40, 90, "SIN RED GUARDADA", UI_ACCENT, 2);
-        drawStringCustom(40, 130, "No hay credenciales WiFi", TFT_WHITE, 1);
-        drawStringCustom(40, 145, "guardadas en este momento.", TFT_WHITE, 1);
-        drawStringCustom(10, 222, "OK/BACK: Volver", UI_ACCENT, 1);
+        systemUiFrame("WIFI CONFIG", "SETTINGS");
+        systemUiCard(18, 72, 284, 92);
+        drawStringCustom(50, 91, "SIN RED GUARDADA", SYS_UI_ACCENT, 2);
+        drawStringCustom(42, 130, "No hay credenciales WiFi guardadas.",
+                         SYS_UI_TEXT, 1);
+        systemUiFooter("NOTHING TO DELETE", "OK/BACK: RETURN");
 
         beep(1500, 60);
 
@@ -40,28 +39,21 @@ static void runForgetWifi() {
     // Caso 2: hay red guardada → confirmar
     String savedSSID = wifiConfigGetSavedSSID();
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_RED);
-    tft.drawRect(1, 1, 318, 238, TFT_RED);
+    systemUiFrame("OLVIDAR WIFI", "CONFIRM");
+    systemUiCard(14, 60, 292, 128, false, SYS_UI_DANGER);
 
-    drawStringCustom(40, 12, "OLVIDAR WIFI", TFT_RED, 3);
-    tft.drawFastHLine(0, 50, 320, TFT_RED);
-
-    drawStringCustom(20, 70, "Red guardada:", TFT_WHITE, 1);
+    drawStringCustom(24, 72, "Red guardada:", SYS_UI_MUTED, 1);
 
     if (getTextWidth(savedSSID, 2) <= 280) {
-        drawStringCustom(20, 90, savedSSID, UI_SELECT, 2);
+        drawStringCustom(24, 90, savedSSID, SYS_UI_ACCENT, 2);
     } else {
-        drawStringFit(20, 95, savedSSID, UI_SELECT, 280, 1);
+        drawStringFit(24, 95, savedSSID, SYS_UI_ACCENT, 272, 1);
     }
 
-    drawStringCustom(20, 130, "Eliminar credenciales?", TFT_WHITE, 1);
-    drawStringCustom(20, 144, "La proxima vez que uses una", UI_ACCENT, 1);
-    drawStringCustom(20, 156, "herramienta con WiFi tendras", UI_ACCENT, 1);
-    drawStringCustom(20, 168, "que escoger una red de nuevo.", UI_ACCENT, 1);
-
-    tft.drawFastHLine(0, 210, 320, TFT_RED);
-    drawStringCustom(10, 220, "OK: SI BORRAR   BACK/UP/DN: CANCELAR", UI_ACCENT, 1);
+    drawStringCustom(24, 126, "Eliminar credenciales?", SYS_UI_TEXT, 1);
+    drawStringCustom(24, 143, "La siguiente conexion pedira", SYS_UI_MUTED, 1);
+    drawStringCustom(24, 156, "seleccionar red y clave de nuevo.", SYS_UI_MUTED, 1);
+    systemUiFooter("OK: DELETE", "BACK/UP/DN: CANCEL");
 
     while (true) {
         if (navEnterPressed()) {
@@ -73,10 +65,10 @@ static void runForgetWifi() {
             wifiConfigForget();
 
             // Pantalla de confirmación
-            tft.fillScreen(TFT_BLACK);
-            tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-            drawStringCustom(40, 90, "RED OLVIDADA", TFT_GREEN, 3);
-            drawStringCustom(40, 140, "Credenciales eliminadas.", TFT_WHITE, 1);
+            systemUiFrame("WIFI CONFIG", "COMPLETE");
+            systemUiCard(28, 78, 264, 82, false, SYS_UI_OK);
+            drawStringCustom(56, 96, "RED OLVIDADA", SYS_UI_OK, 3);
+            drawStringCustom(62, 139, "Credenciales eliminadas.", SYS_UI_TEXT, 1);
 
             beep(2400, 50); delay(30);
             beep(3000, 80);
@@ -99,42 +91,39 @@ static void runForgetWifi() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void drawSettings() {
-    tft.fillScreen(TFT_BLACK);
-
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringCustom(30, 10, "SETTINGS", TFT_WHITE, 3);
-    tft.drawFastHLine(0, 45, 320, TFT_WHITE);
+    if (!settingsFrameReady) {
+        systemUiFrame("SETTINGS", "DEVICE CTRL");
+        systemUiFooter("UP/DN: MOVE  OK: CHANGE", "HOLD/BACK: EXIT");
+        settingsFrameReady = true;
+    }
 
     String soundStr = soundEnabled ? "ON" : "OFF";
 
     for (int i = 0; i < MENU_ITEMS; i++) {
-        int y = 60 + (i * 38);
-
-        if (i == cursor) {
-            tft.fillRect(10, y - 5, 300, 30, TFT_WHITE);
-        }
-
-        uint16_t textColor = (i == cursor) ? TFT_BLACK : TFT_WHITE;
+        int y = 54 + (i * 50);
+        bool selected = i == cursor;
+        tft.fillRect(9, y - 2, 302, 47, SYS_UI_BG);
+        systemUiCard(12, y, 296, 42, selected);
+        uint16_t textColor = selected ? TFT_BLACK : SYS_UI_TEXT;
 
         if (i == 0) {
-            drawStringCustom(20, y, "SOUND: " + soundStr, textColor, 2);
+            drawStringCustom(28, y + 12, "SOUND: " + soundStr, textColor, 2);
         }
         else if (i == 1) {
-            drawStringCustom(20, y, "VOLUME: " + String(soundVolume),
+            drawStringCustom(28, y + 12, "VOLUME: " + String(soundVolume),
                              textColor, 2);
         }
         else if (i == 2) {
-            drawStringCustom(20, y, "FORGET WIFI", textColor, 2);
+            drawStringCustom(28, y + 12, "FORGET WIFI", textColor, 2);
         }
     }
 
-    tft.drawFastHLine(0, 210, 320, TFT_WHITE);
-    drawStringCustom(10, 220, "OK: SELECT   BACK/OK(H): EXIT", UI_ACCENT, 1);
 }
 
 void runSettings() {
 
     cursor = 0;
+    settingsFrameReady = false;
 
     // Evitar doble OK
     while (navEnterPressed() || navBackPressed());
@@ -189,6 +178,7 @@ void runSettings() {
                 while (navEnterPressed() || navBackPressed());
                 delay(100);
                 runForgetWifi();
+                settingsFrameReady = false;
             }
             drawSettings();
             delay(150);

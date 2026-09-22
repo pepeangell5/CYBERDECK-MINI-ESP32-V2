@@ -9,6 +9,7 @@
 #include "PeripheralTools.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 
@@ -108,17 +109,11 @@ static uint16_t riskColor() {
 }
 
 static void drawFrame(const char* title) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, title, TFT_WHITE, 1);
-    tft.drawFastHLine(0, 34, 320, UI_ACCENT);
-    tft.drawFastHLine(0, 214, 320, UI_ACCENT);
+    wifiUiFrame(title, "DEFENSE", WIFI_UI_OK);
 }
 
 static void drawScanScreen(const char* msg) {
-    drawFrame("WIFI AUDIT");
-    drawStringCustom(28, 94, msg, TFT_CYAN, 2);
-    drawStringCustom(28, 126, "Modo defensivo / solo lectura", UI_ACCENT, 1);
+    wifiUiScanAnimationStart("WIFI AUDIT", msg);
 }
 
 static void scanWifi() {
@@ -137,7 +132,11 @@ static void scanWifi() {
     WiFi.disconnect(false, false);
     delay(120);
 
+    WiFi.scanDelete();
+    // Use the stable blocking scan.  The animated async path could finish in
+    // WIFI_SCAN_FAILED after other radio tools and produced an empty audit.
     int n = WiFi.scanNetworks(false, true);
+    wifiUiScanAnimationStop();
     if (n < 0) n = 0;
     if (n > WA_MAX_APS) n = WA_MAX_APS;
 
@@ -245,29 +244,30 @@ static void analyzeWifi() {
 }
 
 static void drawAuditScreen(int scroll) {
-    drawFrame("WIFI AUDIT");
     uint16_t rc = riskColor();
-    drawStringBig(12, 42, riskLabel(), rc, 2);
-    drawStringCustom(154, 44, "SCORE " + String(waRiskScore) + "/100", rc, 1);
-    drawStringCustom(154, 60, "AP:" + String(waApCount) +
+    wifiUiFrame("WIFI AUDIT", String(waRiskScore) + "/100", rc);
+    wifiUiCard(10, 48, 300, 43, false, rc);
+    drawStringBig(18, 57, riskLabel(), rc, 2);
+    drawStringCustom(156, 55, "SCORE " + String(waRiskScore) + "/100", rc, 1);
+    drawStringCustom(156, 70, "AP:" + String(waApCount) +
         " OPEN:" + String(waOpenCount) +
         " WEAK:" + String(waWeakCount), TFT_WHITE, 1);
-    drawStringCustom(154, 76, "CLONE:" + String(waSuspiciousGroups) +
-        " DUP:" + String(waDuplicateGroups), UI_ACCENT, 1);
+    drawStringCustom(18, 82, "CLONE:" + String(waSuspiciousGroups) +
+        " DUP:" + String(waDuplicateGroups), WIFI_UI_ACCENT, 1);
 
-    const int listY = 100;
-    const int rowH = 27;
+    const int listY = 98;
+    const int rowH = 26;
     const int visible = 4;
     for (int row = 0; row < visible; row++) {
         int idx = scroll + row;
         int y = listY + row * rowH;
-        tft.fillRect(8, y - 2, 304, rowH - 2, TFT_BLACK);
+        tft.fillRect(8, y, 304, rowH - 1, TFT_BLACK);
         if (idx >= waFindingCount) continue;
-        tft.drawRect(8, y - 2, 304, rowH - 2, waFindings[idx].color);
-        drawStringFit(14, y + 2, waFindings[idx].title,
+        wifiUiCard(10, y + 1, 300, rowH - 3, false, waFindings[idx].color);
+        drawStringFit(17, y + 5, waFindings[idx].title,
                       waFindings[idx].color, 130, 1);
-        drawStringFit(118, y + 2, waFindings[idx].detail,
-                      TFT_WHITE, 188, 1);
+        drawStringFit(132, y + 5, waFindings[idx].detail,
+                      TFT_WHITE, 170, 1);
     }
 
     if (waFindingCount > visible) {
@@ -275,11 +275,11 @@ static void drawAuditScreen(int scroll) {
         int barH = (visible * trackH) / waFindingCount;
         if (barH < 8) barH = 8;
         int barY = listY + (scroll * (trackH - barH)) / (waFindingCount - visible);
-        tft.fillRect(315, listY, 3, trackH, TFT_BLACK);
-        tft.fillRect(315, barY, 3, barH, TFT_CYAN);
+        tft.fillRect(312, listY, 3, trackH, TFT_BLACK);
+        tft.fillRect(312, barY, 3, barH, WIFI_UI_ACCENT);
     }
 
-    drawStringCustom(8, 222, "UP/DN:MOVE  OK:SAVE SD  BACK:EXIT", UI_ACCENT, 1);
+    wifiUiFooter("UP/DN: MOVE", "OK: SAVE SD");
 }
 
 static bool exportAudit() {
@@ -315,10 +315,13 @@ static bool exportAudit() {
 }
 
 static void showSaveResult(bool ok) {
-    drawFrame(ok ? "SAVE OK" : "SAVE ERROR");
-    drawStringFit(20, 98, ok ? String(WA_REPORT_PATH) : "No se pudo escribir SD",
-                  ok ? TFT_CYAN : TFT_YELLOW, 280, 2);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    wifiUiFrame(ok ? "SAVE OK" : "SAVE ERROR", "SD",
+                ok ? WIFI_UI_OK : WIFI_UI_DANGER);
+    wifiUiCard(20, 76, 280, 82, false,
+               ok ? WIFI_UI_OK : WIFI_UI_DANGER);
+    drawStringFit(32, 106, ok ? String(WA_REPORT_PATH) : "SD WRITE FAILED",
+                  ok ? WIFI_UI_OK : WIFI_UI_WARN, 256, 1);
+    wifiUiFooter("AUDIT REPORT", "OK/BACK: RETURN");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
     delay(80);

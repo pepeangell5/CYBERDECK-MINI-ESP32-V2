@@ -5,6 +5,7 @@
 #include "PeripheralTools.h"
 #include "SoundUtils.h"
 #include "SharedSpi.h"
+#include "RfUi.h"
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  CONFIGURACIÓN
@@ -20,22 +21,22 @@
 #define FOOTER_H         22
 
 // ── Spectrum mode layout ──────────────────────────────────────────────────
-#define SPEC_Y_TOP       34
-#define SPEC_Y_BOTTOM    200
+#define SPEC_Y_TOP       48
+#define SPEC_Y_BOTTOM    188
 #define SPEC_H           (SPEC_Y_BOTTOM - SPEC_Y_TOP)
 #define SPEC_X_LEFT      10
 #define SPEC_X_RIGHT     310
 #define SPEC_W           (SPEC_X_RIGHT - SPEC_X_LEFT)
 
 // ── Waterfall layout ──────────────────────────────────────────────────────
-#define WF_Y_TOP         34
-#define WF_Y_BOTTOM      200
+#define WF_Y_TOP         48
+#define WF_Y_BOTTOM      188
 #define WF_H             (WF_Y_BOTTOM - WF_Y_TOP)
 #define WF_X_LEFT        10
 #define WF_X_RIGHT       310
 
 // ── Channel analyzer layout ───────────────────────────────────────────────
-#define CH_Y_TOP         40
+#define CH_Y_TOP         49
 #define CH_Y_BOTTOM      180
 #define CH_H             (CH_Y_BOTTOM - CH_Y_TOP)
 #define CH_X_LEFT        14
@@ -97,6 +98,7 @@ static int lastRecommendedCh = -1;
 static unsigned long frameCount = 0;
 static bool spectrumNeedsClear = true;
 static bool channelNeedsClear = true;
+static bool rfBaselineFrameReady = false;
 
 // RF baseline defense mode
 static int rfBaseline[SCAN_LIMIT];
@@ -490,16 +492,17 @@ static bool initScannerRadios() {
 
 static void drawScannerErrorScreen() {
     hardClearScannerDisplay();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(45, 90, "NRF24 ERROR", TFT_RED, 2);
-    drawStringCustom(30, 130, "NRF1 CE:" + String(NRF1_CE_PIN) + " CSN:" + String(NRF1_CSN_PIN), UI_ACCENT, 1);
+    rfUiFrame("RADIO ERROR", "CHECK HW", RF_UI_DANGER);
+    rfUiCard(16, 66, 288, 112, false, RF_UI_DANGER);
+    drawStringBig(69, 79, "NRF24 NOT FOUND", RF_UI_DANGER, 1);
+    drawStringCustom(28, 114, "NRF1 CE:" + String(NRF1_CE_PIN) + " CSN:" + String(NRF1_CSN_PIN), RF_UI_TEXT, 1);
 #if NRF2_ENABLED
-    drawStringCustom(30, 145, "NRF2 CE:" + String(NRF2_CE_PIN) + " CSN:" + String(NRF2_CSN_PIN), UI_ACCENT, 1);
+    drawStringCustom(28, 132, "NRF2 CE:" + String(NRF2_CE_PIN) + " CSN:" + String(NRF2_CSN_PIN), RF_UI_TEXT, 1);
 #else
-    drawStringCustom(30, 145, "NRF2 disabled - single module mode", UI_ACCENT, 1);
+    drawStringCustom(28, 132, "NRF2 DISABLED / SINGLE MODE", RF_UI_MUTED, 1);
 #endif
-    drawStringCustom(30, 160, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) + "/" + String(MOSI_PIN), UI_ACCENT, 1);
-    drawStringCustom(30, 190, "OK/BACK: RETURN", UI_ACCENT, 1);
+    drawStringCustom(28, 150, "SPI " + String(SCK_PIN) + "/" + String(MISO_PIN) + "/" + String(MOSI_PIN), RF_UI_ACCENT, 1);
+    rfUiFooter("HARDWARE DIAGNOSTIC", "OK/BACK: RETURN");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
     flushNavInput();
@@ -508,36 +511,22 @@ static void drawScannerErrorScreen() {
 // ═════════════════════════════════════════════════════════════════════════════
 //  HEADER COMÚN (a todos los modos)
 // ═════════════════════════════════════════════════════════════════════════════
-static void drawHeader(const char* title, int modeNum) {
-    tft.fillRect(0, 0, 320, HEADER_H, TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-
-    // Title con fuente BIG
-    drawStringBig(6, 4, title, TFT_WHITE, 1);
-
-    // Mode indicator
-    String modeTag = "MODE " + String(modeNum) + "/3";
-    drawStringRight(306, 6, modeTag, UI_ACCENT, 1);
-
-    // Meter de ruido global (4 bloques) a la derecha
+static void drawHeader() {
+    // The static title and MODE badge are already drawn by rfUiFrame().
+    // Only refresh the changing noise value so the two baselines never stack.
     uint16_t col = (globalNoise < 30) ? TFT_GREEN :
                    (globalNoise < 60) ? TFT_YELLOW :
                    (globalNoise < 85) ? TFT_ORANGE : TFT_RED;
 
-    drawStringCustom(8, 23, "NRF 2.4GHz", UI_ACCENT, 1);
-    drawStringRight(306, 23, "NOISE " + String(globalNoise) + "%", col, 1);
-
-    // Línea divisoria
-    tft.drawFastHLine(0, HEADER_H - 1, 320, UI_ACCENT);
+    tft.fillRect(108, 26, 104, 12, RF_UI_PANEL);
+    drawStringCustom(112, 27, "NOISE " + String(globalNoise) + "%", col, 1);
 }
 
 static void drawFooter(const char* leftInfo) {
-    tft.fillRect(1, 240 - FOOTER_H, 318, FOOTER_H - 1, TFT_BLACK);
-    tft.drawFastHLine(0, 240 - FOOTER_H - 1, 320, UI_ACCENT);
-
-    drawStringCustom(6, 240 - FOOTER_H + 4, leftInfo, UI_ACCENT, 1);
-    drawStringCustom(6, 240 - FOOTER_H + 13,
-        "UP/DN/ENC:MODE   BACK/OK(H):EXIT", UI_ACCENT, 1);
+    static unsigned long lastFooterDraw = 0;
+    if (millis() - lastFooterDraw < 450) return;
+    rfUiFooter(String(leftInfo), "UP/DN: MODE", RF_UI_ACCENT);
+    lastFooterDraw = millis();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -573,8 +562,7 @@ static void drawSpectrumGrid() {
 }
 
 static void drawSpectrumFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
+    rfUiFrame("SPECTRUM", "MODE 1/3", RF_UI_ACCENT);
     drawSpectrumGrid();
     spectrumNeedsClear = false;
 }
@@ -632,8 +620,7 @@ static void drawSpectrumBars() {
 //  MODO 2: WATERFALL
 // ═════════════════════════════════════════════════════════════════════════════
 static void drawWaterfallFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
+    rfUiFrame("WATERFALL", "MODE 2/3", RF_UI_ACCENT);
 
     int labelY = WF_Y_BOTTOM + 2;
     tft.drawFastHLine(WF_X_LEFT, WF_Y_BOTTOM, WF_X_RIGHT - WF_X_LEFT, TFT_WHITE);
@@ -699,8 +686,7 @@ static void waterfallRender() {
 //  MODO 3: CHANNEL ANALYZER
 // ═════════════════════════════════════════════════════════════════════════════
 static void drawChannelFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
+    rfUiFrame("WIFI CHANNELS", "MODE 3/3", RF_UI_ACCENT);
 
     // Grid de fondo
     for (int i = 1; i < 4; i++) {
@@ -783,17 +769,7 @@ static void drawCurrentFrame() {
 }
 
 static void drawCurrentHeader() {
-    switch (currentMode) {
-        case MODE_SPECTRUM:
-            drawHeader("SPECTRUM", 1);
-            break;
-        case MODE_WATERFALL:
-            drawHeader("WATERFALL", 2);
-            break;
-        case MODE_CHANNEL:
-            drawHeader("WIFI CHANS", 3);
-            break;
-    }
+    drawHeader();
 }
 
 static void drawCurrentFooter() {
@@ -842,10 +818,12 @@ static void switchMode(ScanMode newMode) {
 // ═════════════════════════════════════════════════════════════════════════════
 static void drawScannerInitScreen() {
     hardClearScannerDisplay();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(20, 78, "RADIO INIT", TFT_WHITE, 2);
-    drawStringCustom(36, 124, "NRF24 spectrum analyzer", UI_ACCENT, 1);
-    drawStringCustom(58, 146, "Preparando radios...", UI_ACCENT, 1);
+    rfUiFrame("RADIO INIT", "NRF24", RF_UI_ACCENT);
+    rfUiCard(20, 71, 280, 92, false);
+    drawStringBig(69, 91, "PREPARING RADIOS", RF_UI_ACCENT, 1);
+    drawStringCustom(65, 124, "SPI BUS + NRF24 ANALYZER", RF_UI_MUTED, 1);
+    rfUiProgress(42, 145, 236, 8, 45, RF_UI_ACCENT);
+    rfUiFooter("RADIO HARDWARE", "PLEASE WAIT");
 }
 
 static const char* rfRiskLabel() {
@@ -864,27 +842,27 @@ static uint16_t rfRiskColor() {
 
 static void drawRfFrame(const char* title) {
     hardClearScannerDisplay();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(8, 8, title, TFT_WHITE, 1);
-    drawStringRight(308, 12, "DEFENSE", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 34, 320, TFT_WHITE);
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
+    rfUiFrame(title, "DEFENSE", RF_UI_OK);
 }
 
 static void drawRfProgress(int step, int total, const char* msg) {
-    drawRfFrame("RF BASELINE");
-    tft.fillRect(1, 35, 318, 178, TFT_BLACK);
-    drawStringCustom(26, 70, msg, TFT_CYAN, 2);
-    drawStringCustom(26, 98, "Keep radio environment normal", UI_ACCENT, 1);
+    if (step == 1) {
+        drawRfFrame("RF BASELINE");
+        rfUiCard(20, 68, 280, 99, false);
+        drawStringCustom(32, 78, msg, RF_UI_ACCENT, 2);
+        drawStringCustom(32, 103, "KEEP RF ENVIRONMENT NORMAL", RF_UI_MUTED, 1);
+        rfUiFooter("CAPTURING BASELINE", "BACK: CANCEL");
+    } else {
+        prepareScannerDisplay();
+    }
 
     int barX = 24;
     int barY = 130;
     int barW = 272;
-    int fillW = (step * (barW - 2)) / max(1, total);
-    tft.drawRect(barX, barY, barW, 14, TFT_WHITE);
-    if (fillW > 0) tft.fillRect(barX + 1, barY + 1, fillW, 12, TFT_CYAN);
-    drawStringCustom(26, 158, String(step) + "/" + String(total), TFT_WHITE, 2);
-    drawStringCustom(10, 222, "BACK: CANCEL", UI_ACCENT, 1);
+    rfUiProgress(barX, barY, barW, 12,
+                 (step * 100) / max(1, total), RF_UI_ACCENT);
+    tft.fillRect(25, 148, 100, 15, RF_UI_PANEL);
+    drawStringCustom(26, 150, String(step) + "/" + String(total), RF_UI_TEXT, 2);
 }
 
 static bool captureRfBaseline(int rounds) {
@@ -978,19 +956,28 @@ static void drawRfBaselineLive() {
     const int summaryY = 202;
     uint16_t riskCol = rfRiskColor();
 
-    prepareScannerDisplay();
-    tft.fillRect(1, 35, 318, 178, TFT_BLACK);
-    tft.drawFastHLine(8, 102, 304, UI_ACCENT);
+    if (!rfBaselineFrameReady) {
+        hardClearScannerDisplay();
+        rfUiFrame("RF BASELINE", "LIVE", RF_UI_OK);
+        rfUiCard(statusX, statusY + 8, statusW, statusH, false, riskCol);
+        rfUiCard(metricX - 4, statusY + 8, 210, 54, false, RF_UI_ACCENT);
+        tft.drawFastHLine(10, 103, 300, RF_UI_ACCENT);
+        rfUiFooter("UP/DN: NEW BASE", "OK: SAVE");
+        rfBaselineFrameReady = true;
+    } else {
+        prepareScannerDisplay();
+    }
 
-    tft.fillRect(statusX - 1, statusY - 1, statusW + 2, statusH + 2, TFT_BLACK);
-    tft.drawRect(statusX, statusY, statusW, statusH, riskCol);
-    drawStringFit(statusX + 8, statusY + 12, rfRiskLabel(), riskCol,
+    tft.drawRoundRect(statusX, statusY + 8, statusW, statusH, 7, riskCol);
+    tft.fillRect(statusX + 6, statusY + 15, statusW - 12, statusH - 13,
+                 RF_UI_PANEL);
+    drawStringFit(statusX + 8, statusY + 20, rfRiskLabel(), riskCol,
                   statusW - 16, 1, FONT_BIG);
 
-    tft.fillRect(metricX - 2, statusY - 2, 210, 54, TFT_BLACK);
-    drawStringFit(metricX, statusY + 0,
+    tft.fillRect(metricX + 4, statusY + 14, 194, 39, RF_UI_PANEL);
+    drawStringFit(metricX + 4, statusY + 14,
         "SCORE " + String(rfDriftScore) + "/100", riskCol, 204, 1);
-    drawStringFit(metricX, statusY + 16,
+    drawStringFit(metricX + 4, statusY + 28,
         "PEAK NRF" + String(rfDeltaPeakCh) + " +" + String(rfDeltaPeak),
         TFT_WHITE, 204, 1);
 
@@ -998,7 +985,7 @@ static void drawRfBaselineLive() {
     String wifiLine = "WIFI ";
     wifiLine += (peakWifi > 0) ? ("CH" + String(peakWifi)) : String("--");
     wifiLine += "  SPREAD " + String(rfChangedChannels);
-    drawStringFit(metricX, statusY + 32, wifiLine, UI_ACCENT, 204, 1);
+    drawStringFit(metricX + 4, statusY + 42, wifiLine, RF_UI_ACCENT, 196, 1);
 
     tft.fillRect(plotX, plotY, plotW, plotH, TFT_BLACK);
 
@@ -1006,7 +993,7 @@ static void drawRfBaselineLive() {
         int y = plotY + (plotH * g) / 4;
         for (int x = plotX; x < plotX + plotW; x += 6) tft.drawPixel(x, y, UI_ACCENT);
     }
-    tft.drawFastHLine(plotX, plotY + plotH, plotW, TFT_WHITE);
+    tft.drawFastHLine(plotX, plotY + plotH, plotW, RF_UI_TEXT);
 
     for (int i = 0; i < SCAN_LIMIT; i++) {
         int x = bandX(plotX, plotW, i, SCAN_LIMIT);
@@ -1036,12 +1023,10 @@ static void drawRfBaselineLive() {
     }
 
     int strongWifi = strongestWifiDeltaChannel();
-    tft.fillRect(1, summaryY - 2, 318, 14, TFT_BLACK);
+    tft.fillRect(10, summaryY - 2, 300, 12, TFT_BLACK);
     drawStringFit(10, summaryY, "STRONGEST WIFI CH " + String(strongWifi),
                   rfWifiDelta[strongWifi - 1] > 20 ? TFT_YELLOW : TFT_CYAN,
                   300, 1);
-    tft.fillRect(1, 215, 318, 24, TFT_BLACK);
-    drawStringCustom(10, 222, "UP:NEW BASE  OK:SAVE  BACK:EXIT", UI_ACCENT, 1);
 }
 
 static bool exportRfBaselineReport() {
@@ -1074,9 +1059,11 @@ static bool exportRfBaselineReport() {
 
 static void showRfSaveResult(bool ok) {
     drawRfFrame(ok ? "SAVE OK" : "SAVE ERROR");
-    drawStringFit(20, 98, ok ? String("/RF_BASELINE.txt") : "No se pudo escribir SD",
-                  ok ? TFT_CYAN : TFT_YELLOW, 280, 2);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    rfUiCard(20, 76, 280, 82, false, ok ? RF_UI_OK : RF_UI_DANGER);
+    drawStringFit(32, 106,
+                  ok ? String("/RF_BASELINE.txt") : "SD WRITE FAILED",
+                  ok ? RF_UI_OK : RF_UI_ACCENT, 256, 1);
+    rfUiFooter("RF BASELINE REPORT", "OK/BACK: RETURN");
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
     delay(80);
@@ -1096,6 +1083,7 @@ void runRfBaseline() {
     }
 
     frameCount = 0;
+    rfBaselineFrameReady = false;
     if (!captureRfBaseline(10)) {
         cleanupScanner(true);
         while (isEnterPressed() || isBackPressed()) delay(5);
@@ -1104,9 +1092,10 @@ void runRfBaseline() {
         return;
     }
 
+    // The capture view and the live dashboard are independent full-screen
+    // states. The first live render performs the single clean transition.
+    rfBaselineFrameReady = false;
     playStartup();
-    drawRfFrame("RF BASELINE");
-
     bool exitTool = false;
     while (!exitTool) {
         frameCount++;
@@ -1126,14 +1115,14 @@ void runRfBaseline() {
             if (!captureRfBaseline(10)) {
                 exitTool = true;
             } else {
-                drawRfFrame("RF BASELINE");
+                rfBaselineFrameReady = false;
                 flushNavInput();
             }
         } else if (action == NAV_ENTER) {
             bool ok = exportRfBaselineReport();
             beep(ok ? 2400 : 900, 45);
             showRfSaveResult(ok);
-            drawRfFrame("RF BASELINE");
+            rfBaselineFrameReady = false;
         }
 
         delay(8);

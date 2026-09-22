@@ -12,11 +12,12 @@
 #include "PeripheralTools.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "BtUi.h"
 
 extern DisplayTFT tft;
 
 #define BLEA_MAX_DEVICES 42
-#define BLEA_VISIBLE_ROWS 5
+#define BLEA_VISIBLE_ROWS 3
 #define BLEA_SCAN_TIME_S 2
 #define BLEA_STALE_MS 45000UL
 #define BLEA_REPORT_PATH "/BLE_AUDIT.txt"
@@ -284,11 +285,7 @@ static uint16_t exposureColor() {
 }
 
 static void drawFrame(const char* title) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    drawStringBig(10, 8, title, TFT_WHITE, 1);
-    tft.drawFastHLine(0, 34, 320, TFT_WHITE);
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
+    btUiFrame(title, "DEFENSE", BT_UI_OK);
 }
 
 static void drawBars(int x, int y, int rssi, bool selected) {
@@ -305,54 +302,77 @@ static void drawBars(int x, int y, int rssi, bool selected) {
     }
 }
 
+static void drawAuditScanAnimation(uint8_t frame) {
+    const int cx = 63;
+    const int cy = 139;
+    static const int8_t dx[8] = {24, 17, 0, -17, -24, -17, 0, 17};
+    static const int8_t dy[8] = {0, 17, 24, 17, 0, -17, -24, -17};
+
+    tft.fillRect(34, 110, 58, 58, BT_UI_PANEL);
+    tft.drawCircle(cx, cy, 26, BT_UI_LINE);
+    tft.drawCircle(cx, cy, 15, BT_UI_ACCENT);
+    tft.fillCircle(cx, cy, 3, BT_UI_GLOW);
+    uint8_t p = frame & 7;
+    tft.drawLine(cx, cy, cx + dx[p], cy + dy[p], BT_UI_GLOW);
+    tft.drawLine(cx + 1, cy, cx + dx[p] + 1, cy + dy[p], BT_UI_GLOW);
+    tft.drawLine(cx - 1, cy, cx + dx[p] - 1, cy + dy[p], BT_UI_GLOW);
+    tft.fillCircle(cx + dx[p], cy + dy[p], 5, BT_UI_OK);
+}
+
 static void drawAuditList(int cursor, int scroll) {
     uint16_t scoreCol = exposureColor();
-    tft.fillRect(1, 35, 318, 57, TFT_BLACK);
+    // Clear the complete content viewport so the search card cannot remain
+    // visible through the spacing between result cards.
+    tft.fillRect(8, 44, 304, 161, BT_UI_BG);
 
-    drawStringBig(10, 42, exposureLabel(), scoreCol, 2);
-    drawStringCustom(150, 42, "SCORE " + String(bleExposureScore) + "/100", scoreCol, 1);
-    drawStringCustom(150, 58, "DEV:" + String(bleDeviceCount) +
+    drawStringBig(12, 49, exposureLabel(), scoreCol, 2);
+    drawStringCustom(150, 47, "SCORE " + String(bleExposureScore) + "/100", scoreCol, 1);
+    drawStringCustom(150, 62, "DEV:" + String(bleDeviceCount) +
         " NAMED:" + String(bleNamedCount), TFT_WHITE, 1);
-    drawStringCustom(150, 74, "PUB:" + String(blePublicCount) +
+    drawStringCustom(150, 77, "PUB:" + String(blePublicCount) +
         " RAND:" + String(bleRandomCount) +
         " PRIV:" + String(blePrivateCount), UI_ACCENT, 1);
 
     const int listY = 94;
-    const int rowH = 23;
+    const int rowH = 35;
 
     if (bleDeviceCount == 0) {
-        tft.fillRect(1, listY - 3, 318, BLEA_VISIBLE_ROWS * rowH + 4, TFT_BLACK);
-        drawStringCustom(52, 126, "Searching BLE advertisements...", TFT_CYAN, 1);
-        drawStringCustom(52, 144, "Passive defensive scan", UI_ACCENT, 1);
+        tft.fillRect(8, listY - 3, 304, 109, BT_UI_BG);
+        btUiCard(18, 101, 284, 86, false, BT_UI_ACCENT);
+        drawAuditScanAnimation(0);
+        drawStringCustom(104, 119, "SEARCHING BLE", BT_UI_GLOW, 1);
+        drawStringCustom(104, 140, "PASSIVE DEFENSE", BT_UI_TEXT, 1);
+        drawStringCustom(104, 158, "LISTENING FOR ADS", BT_UI_MUTED, 1);
+        btUiFooter("PASSIVE BLE SCAN", "HOLD: SAVE", BT_UI_ACCENT);
+        return;
     }
 
     for (int row = 0; row < BLEA_VISIBLE_ROWS; row++) {
         int idx = scroll + row;
         int y = listY + row * rowH;
-        tft.fillRect(8, y - 2, 304, rowH - 2, TFT_BLACK);
+        tft.fillRect(8, y - 2, 304, rowH - 3, BT_UI_BG);
         if (idx >= bleDeviceCount) continue;
 
         const BleAuditDevice& d = bleDevices[idx];
         bool selected = idx == cursor;
-        uint16_t bg = selected ? TFT_WHITE : TFT_BLACK;
-        uint16_t fg = selected ? TFT_BLACK : TFT_WHITE;
-        uint16_t sub = selected ? TFT_BLACK : UI_ACCENT;
-        uint16_t privacyCol = selected ? TFT_BLACK :
-            (isTrackableAddress(d) ? TFT_YELLOW : TFT_CYAN);
+        uint16_t bg = selected ? BT_UI_ACCENT : BT_UI_PANEL;
+        uint16_t fg = selected ? BT_UI_BG : BT_UI_TEXT;
+        uint16_t sub = selected ? BT_UI_BG : BT_UI_MUTED;
+        uint16_t privacyCol = selected ? BT_UI_BG :
+            (isTrackableAddress(d) ? TFT_YELLOW : BT_UI_GLOW);
 
-        tft.fillRect(8, y - 2, 304, rowH - 2, bg);
-        tft.drawRect(8, y - 2, 304, rowH - 2, TFT_WHITE);
+        tft.fillRoundRect(8, y - 2, 304, rowH - 3, 5, bg);
+        tft.drawRoundRect(8, y - 2, 304, rowH - 3, 5, BT_UI_LINE);
 
         String title;
         if (d.hasName) title = String(d.name);
         else if (d.hasMfg && bleVendorName(d.vendorId)) title = String(bleVendorName(d.vendorId));
         else title = "<unnamed>";
-        drawStringFit(14, y + 1, title, fg, 128, 1);
-
-        drawStringFit(14, y + 13, maskedMac(d.mac), sub, 102, 1);
-        drawStringCustom(130, y + 13, privacyLabel(d), privacyCol, 1);
-        drawStringCustom(218, y + 2, String(d.rssi) + "dBm", fg, 1);
-        drawBars(282, y + 2, d.rssi, selected);
+        drawStringFit(15, y + 2, title, fg, 174, 2);
+        drawStringFit(15, y + 20, maskedMac(d.mac), sub, 108, 1);
+        drawStringCustom(132, y + 20, privacyLabel(d), privacyCol, 1);
+        drawStringCustom(225, y + 4, String(d.rssi) + "dBm", fg, 1);
+        drawBars(282, y + 7, d.rssi, selected);
     }
 
     int trackH = BLEA_VISIBLE_ROWS * rowH;
@@ -364,7 +384,7 @@ static void drawAuditList(int cursor, int scroll) {
         tft.fillRect(315, barY, 3, barH, TFT_CYAN);
     }
 
-    drawStringCustom(8, 222, "UP/DN  OK:INFO  OK-H:SAVE  BACK:EXIT", UI_ACCENT, 1);
+    btUiFooter("UP/DN  OK: INFO", "HOLD: SAVE", BT_UI_ACCENT);
 }
 
 static bool exportBleAudit() {
@@ -415,9 +435,10 @@ static bool exportBleAudit() {
 
 static void showSaveResult(bool ok) {
     drawFrame(ok ? "SAVE OK" : "SAVE ERROR");
+    btUiCard(20, 76, 280, 82, false, ok ? BT_UI_OK : BT_UI_DANGER);
     drawStringFit(20, 98, ok ? String(BLEA_REPORT_PATH) : "No se pudo escribir SD",
                   ok ? TFT_CYAN : TFT_YELLOW, 280, 2);
-    drawStringCustom(10, 222, "OK/BACK: RETURN", UI_ACCENT, 1);
+    btUiFooter("BLE AUDIT REPORT", "OK/BACK: RETURN", BT_UI_ACCENT);
     while (!isEnterPressed() && !isBackPressed()) delay(10);
     while (isEnterPressed() || isBackPressed()) delay(5);
     delay(80);
@@ -462,7 +483,7 @@ static void drawDetails(const BleAuditDevice& d) {
                       TFT_CYAN, 300, 1);
     }
 
-    drawStringCustom(8, 222, "OK/BACK:LIST  OK-H:SAVE REPORT", UI_ACCENT, 1);
+    btUiFooter("OK/BACK: LIST", "HOLD: SAVE", BT_UI_ACCENT);
 }
 
 void runBLEAudit() {
@@ -494,6 +515,9 @@ void runBLEAudit() {
     int scroll = 0;
     int detailIdx = 0;
     unsigned long lastScanStart = millis();
+    unsigned long lastAnimMs = 0;
+    uint8_t scanFrame = 0;
+    bool showingSearch = true;
     bool needsDraw = false;
 
     while (!exitAudit) {
@@ -507,12 +531,18 @@ void runBLEAudit() {
             if (cursor >= bleDeviceCount) cursor = max(0, bleDeviceCount - 1);
             if (scroll > cursor) scroll = cursor;
             if (cursor >= scroll + BLEA_VISIBLE_ROWS) scroll = cursor - BLEA_VISIBLE_ROWS + 1;
+            showingSearch = (bleDeviceCount == 0);
             needsDraw = !inDetails;
         }
 
         if (!inDetails && needsDraw) {
             drawAuditList(cursor, scroll);
             needsDraw = false;
+        }
+
+        if (!inDetails && showingSearch && millis() - lastAnimMs >= 105) {
+            drawAuditScanAnimation(scanFrame++);
+            lastAnimMs = millis();
         }
 
         NavAction action = readNavAction(105);

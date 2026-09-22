@@ -2,12 +2,13 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN
 // ═════════════════════════════════════════════════════════════════════════════
 #define MAX_NETWORKS     30    // Tope de redes (protege el stack)
-#define VISIBLE_LINES    6     // Líneas visibles en la lista
+#define VISIBLE_LINES    4     // Tarjetas grandes visibles en la lista
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ESTRUCTURA DE RED
@@ -203,53 +204,48 @@ static void showDetails(const NetInfo& net) {
 
     ledcWriteTone(0, 0);
 
-    tft.fillScreen(TFT_BLACK);
-    tft.fillRect(0, 0, 320, 32, TFT_WHITE);
-    drawStringCustom(10, 8, "NETWORK DETAILS", TFT_BLACK, 2);
-
-    int y = 44;
+    wifiUiFrame("NETWORK DETAILS", "AP INFO", WIFI_UI_OK);
+    int y = 50;
 
     // SSID (con detección de oculta)
     bool hidden = (net.ssid.length() == 0);
     String displaySsid = hidden ? "<HIDDEN>" : net.ssid;
-    drawStringCustom(10, y, "SSID:", UI_ACCENT, 1);
+    wifiUiCard(10, y - 3, 300, 38, false);
+    drawStringCustom(18, y + 3, "SSID", WIFI_UI_MUTED, 1);
     if (!hidden && getTextWidth(displaySsid, 2) > 300) {
-        drawStringFit(10, y + 10, displaySsid, TFT_WHITE, 300, 1);
+        drawStringFit(82, y + 8, displaySsid, TFT_WHITE, 216, 1);
     } else {
-        drawStringFit(10, y + 10, displaySsid,
-                      hidden ? TFT_RED : TFT_WHITE, 300, 2);
+        drawStringFit(82, y + 8, displaySsid,
+                      hidden ? WIFI_UI_DANGER : TFT_WHITE, 216, 1);
     }
-    y += 34;
+    y += 42;
 
     // Canal + frecuencia
     String chStr = "CH " + String(net.channel) + "  " +
                    String(channelToFreq(net.channel)) + " MHz";
-    drawStringCustom(10, y, "CHANNEL:", UI_ACCENT, 1);
-    drawStringCustom(10, y + 10, chStr, TFT_WHITE, 2);
-    y += 34;
+    wifiUiMetric(10, y, 145, "CHANNEL", chStr, WIFI_UI_ACCENT);
 
     // RSSI + barras
-    drawStringCustom(10, y, "SIGNAL:", UI_ACCENT, 1);
-    drawStringCustom(10, y + 10, String(net.rssi) + " dBm", TFT_WHITE, 2);
-    drawSignalBars(150, y + 10, rssiToBars(net.rssi));
-    y += 34;
+    wifiUiMetric(165, y, 145, "SIGNAL", String(net.rssi) + " dBm",
+                 barsColor(rssiToBars(net.rssi)));
+    drawSignalBars(274, y + 18, rssiToBars(net.rssi));
+    y += 44;
 
     // MAC + fabricante
     String vendor = lookupVendor(net.bssid);
-    drawStringCustom(10, y, "BSSID:", UI_ACCENT, 1);
-    drawStringCustom(10, y + 10, net.bssid, TFT_YELLOW, 1);
-    drawStringCustom(180, y + 10, "(" + vendor + ")",
-                     vendor == "Unknown" ? UI_ACCENT : TFT_CYAN, 1);
-    y += 22;
+    wifiUiCard(10, y, 300, 30, false);
+    drawStringCustom(18, y + 6, "BSSID", WIFI_UI_MUTED, 1);
+    drawStringCustom(74, y + 6, net.bssid, WIFI_UI_WARN, 1);
+    drawStringCustom(220, y + 17, vendor,
+                     vendor == "Unknown" ? WIFI_UI_MUTED : WIFI_UI_ACCENT, 1);
+    y += 35;
 
     // Seguridad + rating de color
-    drawStringCustom(10, y, "SECURITY:", UI_ACCENT, 1);
-    drawStringCustom(10, y + 10, authToString(net.authType),
+    wifiUiCard(10, y, 300, 30, false, authToColor(net.authType));
+    drawStringCustom(18, y + 6, "SECURITY", WIFI_UI_MUTED, 1);
+    drawStringCustom(96, y + 6, authToString(net.authType),
                      authToColor(net.authType), 2);
-
-    // Footer
-    tft.drawFastHLine(0, 215, 320, TFT_WHITE);
-    drawStringCustom(10, 222, "OK/BACK TO RETURN", TFT_WHITE, 2);
+    wifiUiFooter("NETWORK DETAILS", "OK/BACK: RETURN");
 
     delay(400);
     while (!navEnterPressed() && !navBackPressed()) delay(10);
@@ -262,68 +258,63 @@ static void showDetails(const NetInfo& net) {
 // ANIMACIÓN DE SCANNING
 // ═════════════════════════════════════════════════════════════════════════════
 static void drawScanningAnim(int tick) {
-    const char dots[][4] = {"   ", ".  ", ".. ", "..."};
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(40, 95, 240, 50, TFT_WHITE);
-    drawStringCustom(60, 105, "SCANNING", TFT_WHITE, 3);
-    drawStringCustom(200, 110, dots[tick % 4], TFT_WHITE, 3);
+    wifiUiScanning("WIFI SCANNER", "SEARCHING 2.4 GHZ NETWORKS", tick);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // LISTA DE REDES (con scroll bar + barras + encryption color)
 // ═════════════════════════════════════════════════════════════════════════════
-static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
+static void drawNetworkRow(const NetInfo* nets, int n, int idx, int row,
+                           bool selected) {
+    int y = 48 + row * 39;
+    tft.fillRect(8, y, 302, 38, WIFI_UI_BG);
+    if (idx < 0 || idx >= n) return;
 
-    // Header
-    tft.fillRect(0, 0, 320, 25, TFT_WHITE);
-    String hdr = "NETS " + String(n) + "  SEL:" + String(cursor + 1);
-    drawStringCustom(10, 5, hdr, TFT_BLACK, 2);
+    const NetInfo& net = nets[idx];
+    wifiUiCard(10, y + 1, 298, 35, selected);
+    uint16_t fg = selected ? TFT_BLACK : WIFI_UI_TEXT;
+    uint16_t sub = selected ? WIFI_UI_PANEL : WIFI_UI_MUTED;
+    drawSignalBars(19, y + 10, rssiToBars(net.rssi));
+    String label = net.ssid.length() == 0 ? "<HIDDEN>" : net.ssid;
+    drawStringFit(50, y + 5, label,
+                  net.ssid.length() == 0 ? WIFI_UI_DANGER : fg, 202, 1);
+    drawStringCustom(50, y + 20,
+                     "CH" + String(net.channel) + "  " + String(net.rssi) + " dBm",
+                     sub, 1);
+    uint16_t enc = selected ? TFT_BLACK : authToColor(net.authType);
+    drawStringCustom(270, y + 12, authToShort(net.authType), enc, 1);
+}
 
-    // Lista
-    for (int i = 0; i < VISIBLE_LINES; i++) {
-        int idx = i + scrollOffset;
-        int yPos = 35 + (i * 30);
-        tft.fillRect(5, yPos - 4, 305, 26, TFT_BLACK);
-
-        if (idx < n) {
-            int netIdx = idx;
-            const NetInfo& net = nets[netIdx];
-            bool isSelected = (cursor == idx);
-
-            if (isSelected) tft.fillRect(5, yPos - 4, 305, 26, TFT_WHITE);
-            uint16_t fg = isSelected ? TFT_BLACK : TFT_WHITE;
-
-            // Barras de señal
-            drawSignalBars(12, yPos + 2, rssiToBars(net.rssi));
-
-            // SSID (o <HIDDEN>)
-            String label = (net.ssid.length() == 0) ? "<HIDDEN>" : net.ssid;
-            uint16_t ssidColor = (net.ssid.length() == 0)
-                                 ? (isSelected ? TFT_RED : TFT_RED)
-                                 : fg;
-            if (getTextWidth(label, 2) <= 220) {
-                drawStringCustom(45, yPos, label, ssidColor, 2);
-            } else {
-                drawStringFit(45, yPos + 5, label, ssidColor, 220, 1);
-            }
-
-            // Encryption tag (colorcodeado)
-            uint16_t encCol = isSelected ? TFT_BLACK : authToColor(net.authType);
-            drawStringCustom(275, yPos, authToShort(net.authType), encCol, 2);
-        }
-    }
-
-    // Scroll bar lateral (si hay más entradas de las visibles)
-    tft.fillRect(314, 30, 4, 180, TFT_BLACK);
+static void drawNetworkScroll(int n, int scrollOffset) {
+    tft.fillRect(312, 50, 3, 146, WIFI_UI_BG);
     int totalEntries = n;
     if (totalEntries > VISIBLE_LINES) {
-        int barH = map(VISIBLE_LINES, 0, totalEntries, 20, 180);
-        int barY = map(scrollOffset, 0, totalEntries - VISIBLE_LINES, 30, 210 - barH);
-        tft.fillRect(314, barY, 4, barH, UI_ACCENT);
+        int barH = max(18, (VISIBLE_LINES * 146) / totalEntries);
+        int barY = 50 + (scrollOffset * (146 - barH)) /
+                          (totalEntries - VISIBLE_LINES);
+        tft.fillRect(312, barY, 3, barH, WIFI_UI_ACCENT);
     }
+}
 
-    tft.drawFastHLine(0, 218, 320, UI_ACCENT);
-    drawStringCustom(8, 225, "OK:DETAILS  BACK/OK(H):EXIT", UI_ACCENT, 1);
+static void drawList(const NetInfo* nets, int n, int cursor, int scrollOffset) {
+    wifiUiFrame("WIFI SCANNER", String(n) + " AP", WIFI_UI_OK);
+    for (int row = 0; row < VISIBLE_LINES; row++) {
+        int idx = scrollOffset + row;
+        drawNetworkRow(nets, n, idx, row, idx == cursor);
+    }
+    drawNetworkScroll(n, scrollOffset);
+    wifiUiFooter("UP/DN: MOVE", "OK: DETAILS");
+}
+
+static void redrawListMove(const NetInfo* nets, int n, int oldCursor,
+                           int cursor, int oldScroll, int scrollOffset) {
+    if (oldScroll != scrollOffset) {
+        drawList(nets, n, cursor, scrollOffset);
+        return;
+    }
+    drawNetworkRow(nets, n, oldCursor, oldCursor - scrollOffset, false);
+    drawNetworkRow(nets, n, cursor, cursor - scrollOffset, true);
+    drawNetworkScroll(n, scrollOffset);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -341,15 +332,18 @@ void runWifiScan() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
 
-    // Animación de scanning (el scan real es bloqueante, así que
-    // mostramos al menos un frame antes de entrar)
-    drawScanningAnim(0);
-    int n = WiFi.scanNetworks();
+    // The ESP32 Arduino async scanner proved unreliable after returning from
+    // promiscuous-mode tools.  Draw one stable search frame and use the proven
+    // blocking scan so results are always complete before they are copied.
+    WiFi.scanDelete();
+    wifiUiScanAnimationStart("WIFI SCANNER", "SEARCHING 2.4 GHZ NETWORKS");
+    int n = WiFi.scanNetworks(false, true);
+    wifiUiScanAnimationStop();
 
     if (n <= 0) {
-        tft.fillScreen(TFT_BLACK);
-        drawStringCustom(40, 105, "NO NETS FOUND", TFT_RED, 3);
-        delay(2000);
+        wifiUiEmpty("WIFI SCANNER", "NO NETWORKS FOUND",
+                    "MOVE CLOSER OR TRY AGAIN");
+        delay(1600);
         return;
     }
 
@@ -403,26 +397,34 @@ void runWifiScan() {
 
         // DOWN
         if (navDownPressed()) {
+            int oldCursor = cursor;
             int oldScrollOffset = scrollOffset;
             cursor = (cursor + 1) % n;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_LINES)
                 scrollOffset = cursor - VISIBLE_LINES + 1;
-            needsRedraw = true;
-            (void)oldScrollOffset;
+            tft.startWrite();
+            redrawListMove(networks, n, oldCursor, cursor,
+                           oldScrollOffset, scrollOffset);
+            tft.endWrite();
+            needsRedraw = false;
             beep(2000, 30);
             delay(70);
         }
 
         // UP
         if (navUpPressed()) {
+            int oldCursor = cursor;
             int oldScrollOffset = scrollOffset;
             cursor = (cursor + n - 1) % n;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_LINES)
                 scrollOffset = cursor - VISIBLE_LINES + 1;
-            needsRedraw = true;
-            (void)oldScrollOffset;
+            tft.startWrite();
+            redrawListMove(networks, n, oldCursor, cursor,
+                           oldScrollOffset, scrollOffset);
+            tft.endWrite();
+            needsRedraw = false;
             beep(2000, 30);
             delay(70);
         }

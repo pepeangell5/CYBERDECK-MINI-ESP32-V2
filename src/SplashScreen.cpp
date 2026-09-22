@@ -3,13 +3,13 @@
 #include <Arduino.h>
 #include <esp_system.h>
 
-#include "AjoloteSprite.h"
 #include "DisplayTFT.h"
 #include "Input.h"
 #include "NVSStore.h"
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "SplashAxolotlAsset.h"
 
 extern DisplayTFT tft;
 
@@ -48,15 +48,23 @@ static void matrixRain(uint32_t durationMs) {
 
     tft.fillScreen(BOOT_BG);
 }
-
 static void revealAjolote(int x0, int y0) {
-    for (int row = 0; row < AJOLOTE_HEIGHT; row++) {
-        drawAjoloteRow(x0, y0, row, BOOT_FG);
-        tft.drawFastHLine(x0, y0 + row, AJOLOTE_WIDTH, BOOT_ACCENT);
+    bool previousSwapBytes = tft.getSwapBytes();
+    tft.setSwapBytes(true);
+
+    for (int row = 0; row < SPLASH_AXOLOTL_HEIGHT; row++) {
+        const uint16_t* rowPixels =
+            SPLASH_AXOLOTL_IMAGE + row * SPLASH_AXOLOTL_WIDTH;
+        tft.pushImage(x0, y0 + row, SPLASH_AXOLOTL_WIDTH, 1,
+                      rowPixels, SPLASH_AXOLOTL_TRANSPARENT);
+        tft.drawFastHLine(x0, y0 + row, SPLASH_AXOLOTL_WIDTH, BOOT_ACCENT);
         delay(8);
-        tft.drawFastHLine(x0, y0 + row, AJOLOTE_WIDTH, BOOT_BG);
-        drawAjoloteRow(x0, y0, row, BOOT_FG);
+        tft.drawFastHLine(x0, y0 + row, SPLASH_AXOLOTL_WIDTH, BOOT_BG);
+        tft.pushImage(x0, y0 + row, SPLASH_AXOLOTL_WIDTH, 1,
+                      rowPixels, SPLASH_AXOLOTL_TRANSPARENT);
     }
+
+    tft.setSwapBytes(previousSwapBytes);
 }
 
 static void drawCentered(const String& text, int y, uint16_t color,
@@ -137,13 +145,13 @@ void runSplashScreen() {
     tft.drawRect(0, 0, 320, 240, BOOT_FG);
     tft.drawRect(2, 2, 316, 236, BOOT_DIM);
 
-    int ajoX = (320 - AJOLOTE_WIDTH) / 2;
+    int ajoX = (320 - SPLASH_AXOLOTL_WIDTH) / 2;
     int ajoY = 18;
     revealAjolote(ajoX, ajoY);
     beep(1500, 60);
 
     delay(120);
-    int titleY = ajoY + AJOLOTE_HEIGHT + 6;
+    int titleY = ajoY + SPLASH_AXOLOTL_HEIGHT + 6;
     int progressY = titleY + getFontHeight(2, FONT_BIG) + 4;
     int subtitleY = progressY + 13;
 

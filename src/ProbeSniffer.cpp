@@ -7,6 +7,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SoundUtils.h"
+#include "WifiUi.h"
 
 extern DisplayTFT tft;
 
@@ -14,7 +15,7 @@ extern DisplayTFT tft;
 #define MAX_CLIENTS      96
 #define VISIBLE_ROWS     7
 #define CHANNEL_HOP_MS   420
-#define UI_REFRESH_MS    420
+#define UI_REFRESH_MS    1000
 
 struct ClientEntry {
     uint8_t mac[6];
@@ -271,22 +272,27 @@ static void clampCursor() {
     }
 }
 
-static void drawHeader() {
-    tft.fillRect(0, 0, 320, 32, TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(8, 7, "PROBE SNIFFER", UI_MAIN, 1);
+static void drawHeader(bool full = false) {
+    if (full) {
+        tft.fillRoundRect(9, 9, 302, 29, 8, WIFI_UI_PANEL);
+        tft.drawRoundRect(4, 4, 312, 232, 12, WIFI_UI_ACCENT);
+        drawStringBig(14, 13, "PROBE SNIFFER", WIFI_UI_TEXT, 1);
+        tft.drawFastHLine(10, 41, 300, WIFI_UI_ACCENT);
+    }
+
+    // Only the counters and channel change; leave the frame and title intact.
+    tft.fillRect(202, 10, 106, 27, WIFI_UI_PANEL);
 
     char buf[36];
     snprintf(buf, sizeof(buf), "CH:%02d %s", currentChannel,
              paused ? "PAUSE" : "LIVE");
-    drawStringCustom(210, 6, String(buf), paused ? TFT_YELLOW : TFT_GREEN, 1);
+    drawStringCustom(218, 12, String(buf), paused ? WIFI_UI_WARN : WIFI_UI_OK, 1);
 
     snprintf(buf, sizeof(buf), "P:%lu D:%d B:%lu",
              (unsigned long)totalProbesCaptured,
              (int)clientCount,
              (unsigned long)broadcastProbeCount);
-    drawStringCustom(210, 18, String(buf), UI_ACCENT, 1);
-    tft.drawFastHLine(0, 32, 320, UI_ACCENT);
+    drawStringCustom(205, 25, String(buf), WIFI_UI_ACCENT, 1);
 }
 
 static void drawBars(int x, int y, int bars, bool selected) {
@@ -301,42 +307,83 @@ static void drawBars(int x, int y, int bars, bool selected) {
     }
 }
 
-static void drawList() {
-    const int rowH = 24;
-    const int listY = 38;
+static uint32_t probeRowSignature(const ProbeEntry& p, bool selected) {
+    uint32_t h = selected ? 2166136261UL : 16777619UL;
+    for (const char* s = p.ssid; *s; ++s) h = (h ^ (uint8_t)*s) * 16777619UL;
+    h = (h ^ p.count) * 16777619UL;
+    h = (h ^ p.clients) * 16777619UL;
+    h = (h ^ (uint8_t)p.rssi) * 16777619UL;
+    h = (h ^ p.lastChannel) * 16777619UL;
+    h = (h ^ (p.lastSeenMs / 5000UL)) * 16777619UL;
+    return h;
+}
+
+static void drawList(bool force = false) {
+    const int rowH = 22;
+    const int listY = 45;
     const int trackH = rowH * VISIBLE_ROWS;
+    static uint32_t lastSignature[VISIBLE_ROWS] = {};
+    static int lastScroll = -1;
+    static int lastTotal = -1;
+
+    if (force) {
+        memset(lastSignature, 0, sizeof(lastSignature));
+        lastScroll = -1;
+        lastTotal = -1;
+    }
 
     int total = probeCount;
     if (total == 0) {
         if (!emptyListDrawn) {
-            tft.fillRect(2, listY, 316, trackH, TFT_BLACK);
-            drawStringCustom(34, 88, "Esperando probe requests...", UI_ACCENT, 1);
-            drawStringCustom(28, 106, "Gira encoder para navegar cuando aparezcan", UI_ACCENT, 1);
-            drawStringCustom(48, 124, "BACK sale  |  OK cambia orden", UI_ACCENT, 1);
+            tft.fillRect(8, listY, 304, trackH, TFT_BLACK);
+            wifiUiCard(18, 76, 284, 82, false);
+            drawStringBig(49, 93, "WAITING FOR PROBES", WIFI_UI_ACCENT, 1);
+            drawStringCustom(42, 121, "CHANNEL HOP + PASSIVE CAPTURE",
+                             WIFI_UI_MUTED, 1);
+            wifiUiProgress(42, 139, 236, 8, 35, WIFI_UI_ACCENT);
             emptyListDrawn = true;
         }
         return;
     }
 
-    emptyListDrawn = false;
+    // First transition from the waiting card to real results: clear the whole
+    // content area once. Row-by-row painting leaves one-pixel gaps where the
+    // old card and its text remain visible underneath the list.
+    if (emptyListDrawn) {
+        tft.fillRect(8, listY, 304, trackH, TFT_BLACK);
+        emptyListDrawn = false;
+        force = true;
+        memset(lastSignature, 0, sizeof(lastSignature));
+        lastScroll = -1;
+        lastTotal = -1;
+    }
     clampCursor();
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + g_scrollOffset;
         int y = listY + i * rowH;
-        tft.fillRect(5, y, 308, rowH - 2, TFT_BLACK);
-        if (idx >= total) continue;
+        if (idx >= total) {
+            if (force || lastSignature[i] != 0) {
+                tft.fillRect(8, y, 303, rowH - 1, TFT_BLACK);
+                lastSignature[i] = 0;
+            }
+            continue;
+        }
 
         ProbeEntry& p = probes[idx];
         bool sel = idx == g_cursor;
+        uint32_t signature = probeRowSignature(p, sel);
+        if (!force && signature == lastSignature[i] &&
+            lastScroll == g_scrollOffset) continue;
+        lastSignature[i] = signature;
+        tft.fillRect(8, y, 303, rowH - 1, TFT_BLACK);
         uint16_t fg = sel ? UI_BG : UI_MAIN;
         uint16_t sub = sel ? UI_BG : UI_ACCENT;
 
-        if (sel) tft.fillRect(5, y, 308, rowH - 2, UI_SELECT);
-        else tft.drawFastHLine(8, y + rowH - 3, 302, 0x3186);
+        wifiUiCard(10, y, 298, rowH - 2, sel);
 
         String label = String(p.ssid);
         if (label == "<broadcast>") label = "<broadcast/hidden>";
-        drawStringFit(10, y + 3, label, fg, 202, 1);
+        drawStringFit(16, y + 3, label, fg, 196, 1);
 
         char macBuf[12];
         macShort(p.lastMac, macBuf, sizeof(macBuf));
@@ -347,32 +394,39 @@ static void drawList() {
                  p.count, p.clients, p.rssi, p.lastChannel, ago,
                  isRandomizedMac(p.lastMac) ? "R " : "",
                  macBuf);
-        drawStringFit(10, y + 14, String(meta), sub, 270, 1);
-        drawBars(286, y + 17, rssiBars(p.rssi), sel);
+        drawStringFit(16, y + 12, String(meta), sub, 258, 1);
+        drawBars(282, y + 16, rssiBars(p.rssi), sel);
     }
 
-    if (total > VISIBLE_ROWS) {
+    if (force || total != lastTotal || g_scrollOffset != lastScroll) {
+      if (total > VISIBLE_ROWS) {
         int barH = (VISIBLE_ROWS * trackH) / total;
         if (barH < 8) barH = 8;
         int barY = listY + (g_scrollOffset * (trackH - barH)) / (total - VISIBLE_ROWS);
-        tft.fillRect(314, listY, 3, trackH, TFT_BLACK);
-        tft.fillRect(314, barY, 3, barH, UI_ACCENT);
-    } else {
-        tft.fillRect(314, listY, 3, trackH, TFT_BLACK);
+        tft.fillRect(312, listY, 3, trackH, TFT_BLACK);
+        tft.fillRect(312, barY, 3, barH, WIFI_UI_ACCENT);
+      } else {
+        tft.fillRect(312, listY, 3, trackH, TFT_BLACK);
+      }
     }
+    lastScroll = g_scrollOffset;
+    lastTotal = total;
 }
 
-static void drawFooter() {
-    tft.fillRect(1, 211, 318, 28, TFT_BLACK);
-    tft.drawFastHLine(0, 211, 320, UI_ACCENT);
-
+static void drawFooter(bool force = false) {
+    static int lastCount = -1;
+    static unsigned long lastOverflow = ~0UL;
+    static int lastSort = -1;
+    if (!force && lastCount == probeCount && lastOverflow == overflowCount &&
+        lastSort == (int)sortMode) return;
+    lastCount = probeCount;
+    lastOverflow = overflowCount;
+    lastSort = (int)sortMode;
     char left[36];
     snprintf(left, sizeof(left), "SSID:%d/%d OVF:%lu",
              (int)probeCount, MAX_PROBES, (unsigned long)overflowCount);
-    drawStringCustom(8, 218, String(left), UI_MAIN, 1);
-
     String right = "OK:" + String(sortModeLabel()) + "  UP/DN/ENC  BACK";
-    drawStringRight(312, 218, right, UI_ACCENT, 1);
+    wifiUiFooter(String(left), right);
 }
 
 static void nextSortMode() {
@@ -399,9 +453,9 @@ static void moveCursor(int delta) {
 }
 
 static void runSnifferLoop() {
-    drawHeader();
-    drawList();
-    drawFooter();
+    drawHeader(true);
+    drawList(true);
+    drawFooter(true);
 
     unsigned long lastUI = millis();
     unsigned long lastHop = millis();
@@ -496,11 +550,13 @@ void runProbeSniffer() {
     hopIdx = 0;
     currentChannel = hopChannels[0];
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(52, 86, "PROBE SNIFFER", UI_SELECT, 1);
-    drawStringCustom(44, 120, "Promiscuous mode + channel hop", UI_ACCENT, 1);
-    drawStringCustom(54, 138, "BACK sale | OK ordena | HOLD pausa", UI_ACCENT, 1);
+    wifiUiFrame("PROBE SNIFFER", "PASSIVE", WIFI_UI_OK);
+    wifiUiCard(20, 73, 280, 91, false);
+    drawStringBig(54, 93, "PASSIVE PROBE VIEW", WIFI_UI_ACCENT, 1);
+    drawStringCustom(49, 121, "CHANNEL HOP + LIVE DEVICE STATS",
+                     WIFI_UI_MUTED, 1);
+    wifiUiProgress(42, 143, 236, 8, 55, WIFI_UI_OK);
+    wifiUiFooter("STARTING RADIO", "PLEASE WAIT");
     delay(450);
 
     WiFi.mode(WIFI_MODE_NULL);

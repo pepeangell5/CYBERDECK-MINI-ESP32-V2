@@ -1,0 +1,14 @@
+#ifndef SPLASH_AXOLOTL_ASSET_H
+#define SPLASH_AXOLOTL_ASSET_H
+
+#include <Arduino.h>
+
+static constexpr int SPLASH_AXOLOTL_WIDTH = 96;
+static constexpr int SPLASH_AXOLOTL_HEIGHT = 80;
+static constexpr int SPLASH_AXOLOTL_PIXELS =
+    SPLASH_AXOLOTL_WIDTH * SPLASH_AXOLOTL_HEIGHT;
+static constexpr uint16_t SPLASH_AXOLOTL_TRANSPARENT = 0x0001;
+
+extern const uint16_t SPLASH_AXOLOTL_IMAGE[SPLASH_AXOLOTL_PIXELS] PROGMEM;
+
+#endif

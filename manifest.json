@@ -1,15 +1,15 @@
 {
-  "name": "CYBERDECK MINI ESP32",
-  "version": "1.0.0",
+  "name": "CYBERDECK MINI ESP32 V2",
+  "version": "2.0.0",
   "home_assistant_domain": "cyberdeck_mini_esp32",
-  "funding_url": "https://github.com/pepeangell5/CYBERDECK-MINI-ESP32",
+  "funding_url": "https://github.com/pepeangell5/CYBERDECK-MINI-ESP32-V2",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "archivos%20bin/CYBERDECK-MINI-ESP32-firmware-merged.bin",
+          "path": "archivos%20bin/CYBERDECK-MINI-ESP32-V2-firmware-merged.bin",
           "offset": 0
         }
       ]

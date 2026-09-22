@@ -8,6 +8,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SharedSpi.h"
+#include "RfUi.h"
 
 extern DisplayTFT tft;
 
@@ -23,6 +24,8 @@ static bool jam2Ok = false;
 static int jamChannel = 1;
 static bool isAttacking = false;
 static bool exitRequested = false;
+
+static void drawChannelGauge(bool full);
 
 static const uint8_t noisePayload[32] = {
     0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
@@ -52,7 +55,9 @@ static int activeRadioCount() {
 }
 
 static void prepareJammerDisplay() {
-    sharedSpiPrepareDisplay(!isAttacking);
+    // Every TFT operation in this module is now performed while the radios
+    // are stopped. Always force both CE pins low before touching the display.
+    sharedSpiPrepareDisplay(true);
 }
 
 static void clearJammerScreen() {
@@ -68,6 +73,72 @@ static void stopAttack() {
     if (jam2Ok) jam2.stopConstCarrier();
 }
 
+static void pauseAttackCarriers() {
+    if (jam1Ok) {
+        jam1.stopConstCarrier();
+        jam1.powerDown();
+    }
+    if (jam2Ok) {
+        jam2.stopConstCarrier();
+        jam2.powerDown();
+    }
+    sharedSpiPrepareDisplay(true);
+    // Allow the PA/carrier to physically settle before starting a TFT SPI
+    // transaction. A sub-millisecond wait was not sufficient on both radios.
+    delay(4);
+}
+
+static void resumeAttackCarriers() {
+    if (!isAttacking) return;
+    const uint8_t freq = wifiChannelToNrf(jamChannel);
+    if (jam1Ok) {
+        jam1.powerUp();
+        jam1.startConstCarrier(RF24_PA_MAX, freq);
+    }
+    if (jam2Ok) {
+        jam2.powerUp();
+        jam2.startConstCarrier(RF24_PA_MAX, freq);
+    }
+}
+
+static void pauseCarrierCeForAnimation() {
+    if (jam1Ok) digitalWrite(NRF1_CE_PIN, LOW);
+#if NRF2_ENABLED
+    if (jam2Ok) digitalWrite(NRF2_CE_PIN, LOW);
+#endif
+    delayMicroseconds(180);
+    sharedSpiPrepareDisplay(true);
+}
+
+static void resumeCarrierCeAfterAnimation() {
+    if (!isAttacking) return;
+    if (jam1Ok) digitalWrite(NRF1_CE_PIN, HIGH);
+#if NRF2_ENABLED
+    if (jam2Ok) digitalWrite(NRF2_CE_PIN, HIGH);
+#endif
+}
+
+static void changeActiveChannel(int direction) {
+    const bool resumeAfterDraw = isAttacking;
+    if (resumeAfterDraw) pauseAttackCarriers();
+
+    if (direction > 0) {
+        jamChannel = (jamChannel == 14) ? 1 : jamChannel + 1;
+    } else {
+        jamChannel = (jamChannel == 1) ? 14 : jamChannel - 1;
+    }
+
+    // Force both CE pins low while clearing and repainting the TFT. Leaving
+    // constant carrier active made some display writes incomplete on the
+    // shared SPI wiring, which accumulated the old CH digits.
+    sharedSpiPrepareDisplay(true);
+    // Use the same known-good full-screen path used while Jammer is idle.
+    // Besides clearing all glyphs, this resets the TFT address window.
+    drawChannelGauge(true);
+
+    if (resumeAfterDraw) resumeAttackCarriers();
+}
+
 static void drawHeader(const char* title, const String& status, uint16_t color) {
     tft.fillRect(0, 0, 320, 36, color);
     tft.drawRect(0, 0, 320, 240, TFT_WHITE);
@@ -76,56 +147,63 @@ static void drawHeader(const char* title, const String& status, uint16_t color) 
     tft.drawFastHLine(0, 36, 320, TFT_WHITE);
 }
 
+static void drawChannelBars();
+
 static void drawChannelGauge(bool full = true) {
     if (full) {
         clearJammerScreen();
-        drawHeader("JAMMER CANAL", isAttacking ? "ACTIVO" : "LISTO",
-                   isAttacking ? TFT_RED : TFT_WHITE);
-        tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-        drawStringCustom(8, 222, "UP/DN: CANAL", TFT_WHITE, 1);
-        drawStringRight(312, 222, "BACK/OK(H): BACK", TFT_WHITE, 1);
+        rfUiFrame("RF CHANNEL", isAttacking ? "ACTIVE" : "READY",
+                  isAttacking ? RF_UI_DANGER : RF_UI_OK);
+        rfUiCard(10, 161, 300, 39, false,
+                 isAttacking ? RF_UI_DANGER : RF_UI_LINE);
+        rfUiFooter("UP/DN: CHANNEL",
+                   isAttacking ? "OK: STOP  HOLD: BACK" : "OK: START",
+                   isAttacking ? RF_UI_DANGER : RF_UI_OK);
     } else {
         prepareJammerDisplay();
     }
 
-    tft.fillRect(1, 42, 318, 166, TFT_BLACK);
+    // Rebuild the complete card instead of erasing only the text rectangle.
+    // This guarantees that every scaled glyph pixel from the previous channel
+    // is removed on the real TFT, including while returning from RF mode.
+    rfUiCard(10, 49, 300, 105, false,
+             isAttacking ? RF_UI_DANGER : RF_UI_ACCENT);
+    drawStringCustom(18, 57, "SELECTED WIFI CHANNEL", RF_UI_MUTED, 1);
+    drawStringCustom(18, 132, "RADIO MODULES", RF_UI_MUTED, 1);
 
     String chText = "CH " + String(jamChannel);
-    drawStringCentered(56, chText, TFT_YELLOW, 3, FONT_BIG);
-    drawStringCentered(100,
+    drawStringCentered(72, chText, RF_UI_ACCENT, 3, FONT_BIG);
+    drawStringCentered(111,
         String(2400 + wifiChannelToNrf(jamChannel)) + " MHz NRF",
-        TFT_CYAN, 1, FONT_SMALL);
+        RF_UI_TEXT, 1, FONT_SMALL);
 
     int pct = 7 + ((jamChannel - 1) * 93) / 13;
-    tft.drawRect(20, 124, 280, 14, TFT_WHITE);
-    tft.fillRect(22, 126, ((276 * pct) / 100), 10,
-                 isAttacking ? TFT_RED : TFT_GREEN);
+    rfUiProgress(20, 123, 280, 9, pct,
+                 isAttacking ? RF_UI_DANGER : RF_UI_OK);
 
-    drawStringCustom(22, 154, "RADIOS: " + String(activeRadioCount()) + "/" + String(NRF_RADIO_COUNT),
-                     activeRadioCount() > 0 ? TFT_GREEN : TFT_RED, 1);
+    tft.fillRect(116, 133, 178, 12, RF_UI_PANEL);
+    drawStringCustom(116, 134,
+                     String(activeRadioCount()) + "/" + String(NRF_RADIO_COUNT),
+                     activeRadioCount() > 0 ? RF_UI_OK : RF_UI_DANGER, 1);
 
     if (isAttacking) {
-        uint8_t frame = (millis() / 70) & 0xFF;
-        for (int i = 0; i < 24; i++) {
-            int h = 4 + ((frame + i * 5) % 34);
-            uint16_t c = h > 24 ? TFT_RED : TFT_YELLOW;
-            tft.fillRect(22 + i * 12, 202 - h, 7, h, c);
-        }
+        drawChannelBars();
     } else {
-        tft.drawRect(90, 166, 140, 26, TFT_WHITE);
-        drawStringCentered(174, "OK: START", TFT_GREEN, 1, FONT_SMALL);
+        tft.fillRect(18, 168, 284, 25, RF_UI_PANEL);
+        drawStringCentered(176, "READY FOR AUTHORIZED LAB", RF_UI_OK,
+                           1, FONT_SMALL);
     }
 
 }
 
 static void drawChannelBars() {
     prepareJammerDisplay();
-    tft.fillRect(18, 164, 292, 40, TFT_BLACK);
+    tft.fillRect(18, 168, 284, 25, RF_UI_PANEL);
     uint8_t frame = (millis() / 70) & 0xFF;
-    for (int i = 0; i < 24; i++) {
-        int h = 4 + ((frame + i * 5) % 34);
-        uint16_t c = h > 24 ? TFT_RED : TFT_YELLOW;
-        tft.fillRect(22 + i * 12, 202 - h, 7, h, c);
+    for (int i = 0; i < 28; i++) {
+        int h = 3 + ((frame + i * 5) % 20);
+        uint16_t c = h > 14 ? RF_UI_DANGER : RF_UI_ACCENT;
+        tft.fillRect(20 + i * 10, 192 - h, 6, h, c);
     }
 }
 
@@ -166,7 +244,10 @@ void jammerSetup() {
 }
 
 void jammerLoop() {
-    if (isBackPressed()) {
+    static unsigned long lastBars = 0;
+    NavAction action = readNavAction(130);
+
+    if (action == NAV_BACK || isBackPressed()) {
         stopAttack();
         exitRequested = true;
         while (isBackPressed()) delay(5);
@@ -174,31 +255,15 @@ void jammerLoop() {
         return;
     }
 
-    if (digitalRead(BTN_UP) == LOW) {
-        jamChannel = (jamChannel == 14) ? 1 : jamChannel + 1;
-        if (isAttacking && jam1Ok) {
-            jam1.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
-        }
-        if (isAttacking && jam2Ok) {
-            jam2.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
-        }
-        drawChannelGauge(false);
-        delay(70);
+    if (action == NAV_UP) {
+        changeActiveChannel(1);
     }
 
-    if (digitalRead(BTN_DOWN) == LOW) {
-        jamChannel = (jamChannel == 1) ? 14 : jamChannel - 1;
-        if (isAttacking && jam1Ok) {
-            jam1.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
-        }
-        if (isAttacking && jam2Ok) {
-            jam2.startConstCarrier(RF24_PA_MAX, wifiChannelToNrf(jamChannel));
-        }
-        drawChannelGauge(false);
-        delay(70);
+    if (action == NAV_DOWN) {
+        changeActiveChannel(-1);
     }
 
-    if (isEnterPressed()) {
+    if (action == NAV_ENTER) {
         bool held = waitOkReleaseWasLong();
         if (held) {
             stopAttack();
@@ -207,19 +272,31 @@ void jammerLoop() {
             return;
         }
 
-        isAttacking = !isAttacking;
-        uint8_t freq = wifiChannelToNrf(jamChannel);
-        if (isAttacking) {
-            if (jam1Ok) jam1.startConstCarrier(RF24_PA_MAX, freq);
-            if (jam2Ok) jam2.startConstCarrier(RF24_PA_MAX, freq);
+        if (!isAttacking) {
+            // Draw the ACTIVE state while both radios are still quiet. Once
+            // carrier starts, do not touch the TFT until the next controlled
+            // pause; both devices share the same SPI bus.
+            sharedSpiPrepareDisplay(true);
+            isAttacking = true;
+            drawChannelGauge();
+            resumeAttackCarriers();
         } else {
-            stopAttack();
+            pauseAttackCarriers();
+            isAttacking = false;
+            drawChannelGauge();
         }
-        drawChannelGauge();
         delay(220);
     }
 
     if (isAttacking) {
+        if (millis() - lastBars >= 180) {
+            // CE-low is enough to pause constant carrier without losing its
+            // configuration. Draw one small frame, then resume immediately.
+            pauseCarrierCeForAnimation();
+            drawChannelBars();
+            resumeCarrierCeAfterAnimation();
+            lastBars = millis();
+        }
         delayMicroseconds(150);
     }
 }

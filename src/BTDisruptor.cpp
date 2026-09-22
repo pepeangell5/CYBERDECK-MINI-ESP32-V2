@@ -12,6 +12,7 @@
 #include "Pins.h"
 #include "Input.h"
 #include "SoundUtils.h"
+#include "BtUi.h"
 
 extern DisplayTFT tft;
 
@@ -100,29 +101,23 @@ static void randomizeOwnMac() {
 //  DISCLAIMER
 // ═══════════════════════════════════════════════════════════════════════════
 static bool showDisclaimer() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
+    btUiFrame("BT DISRUPTOR", "AUTHORIZED", BT_UI_DANGER);
+    btUiCard(12, 49, 296, 151, false, BT_UI_DANGER);
 
-    drawStringBig(30, 10, "DISRUPTOR", UI_SELECT, 2);
-    tft.drawFastHLine(0, 50, 320, UI_SELECT);
+    int y = 59;
+    drawStringCentered(y, "TARGETS A SPECIFIC BLE DEVICE", UI_MAIN, 1, FONT_SMALL); y += 12;
+    drawStringCentered(y, "TO DISRUPT ITS OPERATION", UI_MAIN, 1, FONT_SMALL); y += 18;
 
-    int y = 62;
-    drawStringCustom(10, y, "Targets a specific BLE device",   UI_MAIN, 1); y += 12;
-    drawStringCustom(10, y, "to disrupt its operation.",        UI_MAIN, 1); y += 18;
+    drawStringCentered(y, "USE ONLY ON YOUR OWN DEVICES", UI_ACCENT, 1, FONT_SMALL); y += 12;
+    drawStringCentered(y, "OR WITH EXPLICIT PERMISSION", UI_ACCENT, 1, FONT_SMALL); y += 18;
 
-    drawStringCustom(10, y, "Use ONLY on:",                      UI_MAIN, 1); y += 12;
-    drawStringCustom(20, y, "- Your own devices",                UI_ACCENT, 1); y += 12;
-    drawStringCustom(20, y, "- With explicit permission",        UI_ACCENT, 1); y += 18;
+    drawStringCentered(y, "NEVER USE ON", TFT_RED, 1, FONT_SMALL); y += 12;
+    drawStringCentered(y, "HOSPITAL OR MEDICAL EQUIPMENT", UI_ACCENT, 1, FONT_SMALL); y += 12;
+    drawStringCentered(y, "THIRD PARTIES WITHOUT CONSENT", UI_ACCENT, 1, FONT_SMALL); y += 18;
 
-    drawStringCustom(10, y, "NEVER on:",                         TFT_RED, 1); y += 12;
-    drawStringCustom(20, y, "- Hospital equipment",              UI_ACCENT, 1); y += 12;
-    drawStringCustom(20, y, "- Hearing aids / medical",          UI_ACCENT, 1); y += 12;
-    drawStringCustom(20, y, "- 3rd party without consent",       UI_ACCENT, 1); y += 18;
+    drawStringCentered(y, "YOU ARE RESPONSIBLE", UI_MAIN, 1, FONT_SMALL);
 
-    drawStringCustom(10, y, "You are responsible.",              UI_MAIN, 1);
-
-    tft.drawFastHLine(0, 210, 320, UI_MAIN);
-    drawStringCustom(10, 218, "OK: ACCEPT   BACK/UP/DN: CANCEL", UI_ACCENT, 1);
+    btUiFooter("OK: ACCEPT", "BACK: CANCEL", BT_UI_DANGER);
 
     while (true) {
         if (navEnterPressed()) {
@@ -169,16 +164,15 @@ class DisruptorScanCb : public BLEAdvertisedDeviceCallbacks {
 static void performScan() {
     targetCount = 0;
 
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-    drawStringBig(10, 8, "BT DISRUPTOR", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    btUiFrame("BT DISRUPTOR", "SCANNING", BT_UI_GLOW);
+    btUiCard(20, 66, 280, 105, false, BT_UI_ACCENT);
+    drawStringCentered(79, "SCANNING BLE TARGETS", BT_UI_TEXT, 1, FONT_BIG);
+    drawStringCentered(105, String(SCAN_TIME_S) + " SECOND WINDOW",
+                       BT_UI_MUTED, 1, FONT_SMALL);
 
-    drawStringCustom(10, 50, "Scanning BLE devices...", UI_MAIN, 1);
-    drawStringCustom(10, 62, String(SCAN_TIME_S) + " seconds", UI_ACCENT, 1);
-
-    int barX = 10, barY = 90, barW = 300, barH = 14;
-    tft.drawRect(barX, barY, barW, barH, UI_ACCENT);
+    int barX = 32, barY = 132, barW = 256, barH = 12;
+    btUiProgress(barX, barY, barW, barH, 0, BT_UI_ACCENT);
+    btUiFooter("BLE ACTIVE SCAN", "BACK: CANCEL", BT_UI_ACCENT);
 
     BLEScan* scanner = BLEDevice::getScan();
     scanner->setAdvertisedDeviceCallbacks(new DisruptorScanCb(), false);
@@ -192,11 +186,10 @@ static void performScan() {
     while (millis() - scanStart < SCAN_TIME_S * 1000UL + 200) {
         float progress = (float)(millis() - scanStart) / (SCAN_TIME_S * 1000.0f);
         if (progress > 1.0f) progress = 1.0f;
-        int fillW = (int)((barW - 2) * progress);
-        tft.fillRect(barX + 1, barY + 1, fillW, barH - 2, UI_SELECT);
+        btUiProgress(barX, barY, barW, barH, (int)(progress * 100.0f), BT_UI_ACCENT);
 
-        tft.fillRect(10, 115, 200, 12, TFT_BLACK);
-        drawStringCustom(10, 115, "FOUND: " + String(targetCount), TFT_GREEN, 2);
+        tft.fillRect(95, 151, 130, 14, BT_UI_PANEL);
+        drawStringCentered(151, "FOUND " + String(targetCount), BT_UI_OK, 1, FONT_BIG);
 
         delay(100);
     }
@@ -224,18 +217,13 @@ static void performScan() {
 //  PANTALLA 2 · SELECCIÓN DE TARGET
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawTargetList(int cursor, int scrollOffset) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "SELECT TARGET", UI_MAIN, 1);
-    drawStringCustom(230, 12, "[" + String(targetCount) + " devs]", UI_ACCENT, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    btUiFrame("SELECT TARGET", String(targetCount) + " DEVICES", BT_UI_GLOW);
 
     int totalItems = targetCount + 1;
     int rescanIdx  = targetCount;
 
-    const int rowH = 28;
-    const int listY = 36;
+    const int rowH = 26;
+    const int listY = 47;
 
     for (int i = 0; i < VISIBLE_ROWS; i++) {
         int idx = i + scrollOffset;
@@ -244,10 +232,11 @@ static void drawTargetList(int cursor, int scrollOffset) {
         int y = listY + i * rowH;
         bool selected = (idx == cursor);
 
-        if (selected) tft.fillRect(5, y, 310, rowH - 2, UI_SELECT);
+        tft.fillRect(8, y, 303, rowH - 2, BT_UI_BG);
+        if (selected) tft.fillRoundRect(9, y, 300, rowH - 2, 5, BT_UI_ACCENT);
 
-        uint16_t colMain = selected ? UI_BG : UI_MAIN;
-        uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
+        uint16_t colMain = selected ? BT_UI_BG : BT_UI_TEXT;
+        uint16_t colSub  = selected ? BT_UI_BG : BT_UI_MUTED;
 
         if (idx == rescanIdx) {
             drawStringCustom(10, y + 7, "< RESCAN", colMain, 2);
@@ -279,13 +268,47 @@ static void drawTargetList(int cursor, int scrollOffset) {
     }
 
     if (totalItems > VISIBLE_ROWS) {
-        int barH = (VISIBLE_ROWS * 176) / totalItems;
-        int barY = 36 + (scrollOffset * (176 - barH)) / (totalItems - VISIBLE_ROWS);
-        tft.fillRect(314, barY, 4, barH, UI_ACCENT);
+        int barH = (VISIBLE_ROWS * 156) / totalItems;
+        int barY = 48 + (scrollOffset * (156 - barH)) / (totalItems - VISIBLE_ROWS);
+        tft.fillRect(312, barY, 3, barH, BT_UI_ACCENT);
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:SELECT  BACK/OK(H):BACK", UI_ACCENT, 1);
+    btUiFooter("UP/DN: TARGET", "OK: SELECT", BT_UI_ACCENT);
+}
+
+static void drawTargetRow(int idx, int row, bool selected) {
+    const int rowH = 26;
+    const int y = 47 + row * rowH;
+    const int rescanIdx = targetCount;
+    tft.fillRect(8, y, 303, rowH - 2, BT_UI_BG);
+    if (idx < 0 || idx > rescanIdx) return;
+    if (selected) tft.fillRoundRect(9, y, 300, rowH - 2, 5, BT_UI_ACCENT);
+
+    uint16_t colMain = selected ? BT_UI_BG : BT_UI_TEXT;
+    uint16_t colSub = selected ? BT_UI_BG : BT_UI_MUTED;
+    if (idx == rescanIdx) {
+        drawStringCustom(10, y + 7, "< RESCAN", colMain, 2);
+        return;
+    }
+
+    Target& t = targets[idx];
+    String name = t.name.length() > 0 ? t.name : "<unnamed>";
+    if (getTextWidth(name, 2) <= 190) drawStringCustom(10, y + 4, name, colMain, 2);
+    else drawStringFit(10, y + 8, name, colMain, 190, 1);
+    drawStringCustom(10, y + 18, t.mac, colSub, 1);
+    drawStringCustom(210, y + 4, String(t.rssi) + "dBm", colMain, 2);
+
+    int bars = rssiBars(t.rssi);
+    int bx = 280, by = y + 23;
+    for (int b = 0; b < 4; b++) {
+        int bh = 3 + b * 2;
+        uint16_t c = (b < bars)
+            ? (selected ? BT_UI_BG : (bars >= 3 ? TFT_GREEN :
+                                      bars >= 2 ? TFT_YELLOW : TFT_ORANGE))
+            : (selected ? BT_UI_BG : BT_UI_ACCENT);
+        if (b < bars) tft.fillRect(bx + b*5, by - bh, 3, bh, c);
+        else          tft.drawRect(bx + b*5, by - bh, 3, bh, c);
+    }
 }
 
 static int selectTarget() {
@@ -297,32 +320,47 @@ static int selectTarget() {
     flushNavInput();
 
     while (true) {
-        if (isBackPressed()) {
+        NavAction action = readNavAction(110);
+        if (action == NAV_BACK) {
             beep(1000, 50);
             while (isBackPressed()) delay(5);
             delay(70);
             flushNavInput();
             return -1;
         }
-        if (navUpPressed()) {
+        if (action == NAV_UP) {
+            int oldCursor = cursor;
+            int oldScroll = scrollOffset;
             cursor = (cursor - 1 + totalItems) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
-            drawTargetList(cursor, scrollOffset);
-            delay(70);
+            if (scrollOffset != oldScroll) drawTargetList(cursor, scrollOffset);
+            else {
+                tft.startWrite();
+                drawTargetRow(oldCursor, oldCursor - scrollOffset, false);
+                drawTargetRow(cursor, cursor - scrollOffset, true);
+                tft.endWrite();
+            }
         }
-        if (navDownPressed()) {
+        if (action == NAV_DOWN) {
+            int oldCursor = cursor;
+            int oldScroll = scrollOffset;
             cursor = (cursor + 1) % totalItems;
             if (cursor < scrollOffset) scrollOffset = cursor;
             if (cursor >= scrollOffset + VISIBLE_ROWS)
                 scrollOffset = cursor - VISIBLE_ROWS + 1;
             beep(2100, 20);
-            drawTargetList(cursor, scrollOffset);
-            delay(70);
+            if (scrollOffset != oldScroll) drawTargetList(cursor, scrollOffset);
+            else {
+                tft.startWrite();
+                drawTargetRow(oldCursor, oldCursor - scrollOffset, false);
+                drawTargetRow(cursor, cursor - scrollOffset, true);
+                tft.endWrite();
+            }
         }
-        if (navEnterPressed()) {
+        if (action == NAV_ENTER) {
             bool held = waitOkReleaseWasLong();
             beep(held ? 1000 : 1800, 40);
             delay(100);
@@ -339,34 +377,30 @@ static int selectTarget() {
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawModeMenuRow(int idx, bool selected) {
     int y = 70 + idx * 26;
-    uint16_t bg = selected ? UI_SELECT : UI_BG;
-    uint16_t colMain = selected ? UI_BG : UI_MAIN;
-    uint16_t colSub  = selected ? UI_BG : UI_ACCENT;
+    uint16_t bg = selected ? BT_UI_ACCENT : BT_UI_PANEL;
+    uint16_t colMain = selected ? BT_UI_BG : BT_UI_TEXT;
+    uint16_t colSub  = selected ? BT_UI_BG : BT_UI_MUTED;
 
-    tft.fillRect(5, y - 2, 310, 22, bg);
+    tft.fillRoundRect(9, y - 2, 302, 22, 5, bg);
+    tft.drawRoundRect(9, y - 2, 302, 22, 5, BT_UI_LINE);
     drawStringCustom(15, y + 2, ATK_NAMES[idx], colMain, 2);
     drawStringCustom(15, y + 14, ATK_DESCS[idx], colSub, 1);
 }
 
 static void drawModeMenu(int cursor, const Target& t) {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_MAIN);
-
-    drawStringBig(10, 8, "ATTACK MODE", UI_MAIN, 1);
-    tft.drawFastHLine(0, 30, 320, UI_ACCENT);
+    btUiFrame("DISRUPTOR MODE", "TARGET LOCK", BT_UI_DANGER);
 
     String tName = t.name.length() > 0 ? t.name : "<unnamed>";
     drawStringFit(10, 38, "Target: " + tName, UI_SELECT, 300, 1);
     drawStringCustom(10, 50, "MAC:    " + t.mac, UI_ACCENT, 1);
-    tft.drawFastHLine(0, 63, 320, UI_ACCENT);
+    tft.drawFastHLine(10, 63, 300, BT_UI_ACCENT);
 
     int totalItems = ATK_COUNT;
     for (int i = 0; i < totalItems; i++) {
         drawModeMenuRow(i, i == cursor);
     }
 
-    tft.drawFastHLine(0, 215, 320, UI_ACCENT);
-    drawStringCustom(10, 222, "OK:START   BACK/OK(H):BACK", UI_ACCENT, 1);
+    btUiFooter("UP/DN: MODE", "OK: START", BT_UI_DANGER);
 }
 
 static int selectAttackMode(const Target& t) {
@@ -377,14 +411,15 @@ static int selectAttackMode(const Target& t) {
     flushNavInput();
 
     while (true) {
-        if (isBackPressed()) {
+        NavAction action = readNavAction(110);
+        if (action == NAV_BACK) {
             beep(1000, 50);
             while (isBackPressed()) delay(5);
             delay(70);
             flushNavInput();
             return -1;
         }
-        if (navUpPressed()) {
+        if (action == NAV_UP) {
             int oldCursor = cursor;
             cursor = (cursor - 1 + totalItems) % totalItems;
             beep(2100, 20);
@@ -392,9 +427,8 @@ static int selectAttackMode(const Target& t) {
             drawModeMenuRow(oldCursor, false);
             drawModeMenuRow(cursor, true);
             tft.endWrite();
-            delay(70);
         }
-        if (navDownPressed()) {
+        if (action == NAV_DOWN) {
             int oldCursor = cursor;
             cursor = (cursor + 1) % totalItems;
             beep(2100, 20);
@@ -402,9 +436,8 @@ static int selectAttackMode(const Target& t) {
             drawModeMenuRow(oldCursor, false);
             drawModeMenuRow(cursor, true);
             tft.endWrite();
-            delay(70);
         }
-        if (navEnterPressed()) {
+        if (action == NAV_ENTER) {
             bool held = waitOkReleaseWasLong();
             beep(held ? 1000 : 1800, 40);
             delay(100);
@@ -494,44 +527,37 @@ static void executeAttackTick(BLEAdvertising* adv, AttackMode mode) {
 //  PANTALLA 4 · ATAQUE ACTIVO
 // ═══════════════════════════════════════════════════════════════════════════
 static void drawAttackFrame() {
-    tft.fillScreen(TFT_BLACK);
-    tft.drawRect(0, 0, 320, 240, UI_SELECT);
-    tft.drawRect(1, 1, 318, 238, UI_SELECT);
-
-    drawStringBig(10, 10, "DISRUPTING", UI_SELECT, 1);
-    drawStringCustom(215, 16, "[ACTIVE]", TFT_GREEN, 1);
-    tft.drawFastHLine(0, 36, 320, UI_SELECT);
+    btUiFrame("BT DISRUPTOR", "ACTIVE", BT_UI_DANGER);
 
     String tName = activeTarget.name.length() > 0 ? activeTarget.name : "<unnamed>";
 
-    drawStringFit(10, 44, "Target: " + tName, UI_MAIN, 300, 1);
-    drawStringCustom(10, 58, "Mode:   " + String(ATK_NAMES[activeMode]), UI_MAIN, 1);
+    btUiCard(10, 49, 300, 45, false, BT_UI_DANGER);
+    drawStringFit(18, 58, "TARGET " + tName, BT_UI_TEXT, 284, 1);
+    drawStringCustom(18, 76, "MODE " + String(ATK_NAMES[activeMode]), BT_UI_GLOW, 1);
 
-    drawStringCustom(10, 82,  "Time:",    UI_ACCENT, 1);
-    drawStringCustom(10, 110, "Packets:", UI_ACCENT, 1);
-    drawStringCustom(10, 138, "Rate:",    UI_ACCENT, 1);
+    btUiCard(10, 99, 300, 94, false, BT_UI_ACCENT);
+    drawStringCustom(16, 106, "TIME",    BT_UI_MUTED, 1);
+    drawStringCustom(16, 132, "PACKETS", BT_UI_MUTED, 1);
+    drawStringCustom(16, 158, "RATE",    BT_UI_MUTED, 1);
 
-    tft.drawRect(10, 170, 300, 16, UI_ACCENT);
-
-    tft.drawFastHLine(0, 210, 320, UI_SELECT);
-    drawStringCustom(10, 220, "BACK / OK(HOLD): STOP", TFT_RED, 1);
+    btUiFooter("BLE OPERATION", "HOLD/BACK: STOP", BT_UI_DANGER);
 }
 
 static void drawAttackStats(unsigned long elapsed, unsigned long pkts, float rate) {
-    tft.fillRect(90, 78, 200, 14, TFT_BLACK);
-    drawStringCustom(90, 82, formatTime(elapsed), TFT_YELLOW, 2);
+    tft.fillRect(92, 105, 208, 18, BT_UI_PANEL);
+    drawStringCustom(92, 107, formatTime(elapsed), TFT_YELLOW, 2);
 
-    tft.fillRect(90, 106, 200, 14, TFT_BLACK);
-    drawStringCustom(90, 110, String(pkts), TFT_GREEN, 2);
+    tft.fillRect(92, 131, 208, 18, BT_UI_PANEL);
+    drawStringCustom(92, 133, String(pkts), BT_UI_OK, 2);
 
-    tft.fillRect(90, 134, 200, 14, TFT_BLACK);
+    tft.fillRect(92, 157, 208, 18, BT_UI_PANEL);
     char rbuf[16];
     snprintf(rbuf, sizeof(rbuf), "%d pkt/s", (int)rate);
-    drawStringCustom(90, 138, String(rbuf), TFT_CYAN, 2);
+    drawStringCustom(92, 159, String(rbuf), BT_UI_GLOW, 2);
 
-    tft.fillRect(12, 172, 296, 12, TFT_BLACK);
+    tft.fillRect(18, 178, 284, 9, BT_UI_PANEL);
     int fillW = random(40, 290);
-    tft.fillRect(12, 172, fillW, 12, UI_SELECT);
+    tft.fillRoundRect(18, 178, fillW, 9, 4, BT_UI_DANGER);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

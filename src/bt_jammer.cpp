@@ -9,6 +9,7 @@
 #include "PepeDraw.h"
 #include "Pins.h"
 #include "SharedSpi.h"
+#include "BtUi.h"
 
 extern DisplayTFT tft;
 
@@ -37,6 +38,7 @@ static bool backlightPwmActive = false;
 static uint8_t btSweepIndex = 0;
 static uint8_t btCh1 = 2;
 static uint8_t btCh2 = 41;
+static unsigned long btLastUiAnimMs = 0;
 
 static constexpr int BT_BL_LEDC_CHANNEL = 7;
 static constexpr int BT_BL_LEDC_FREQ = 5000;
@@ -163,57 +165,94 @@ static void stopBtJammer() {
     restoreBacklight();
 }
 
+static void updateBtJammerAnimation() {
+    if (!isBtJamming || millis() - btLastUiAnimMs < 240) return;
+    btLastUiAnimMs = millis();
+
+    // Constant carrier needs no continuous SPI traffic. Pause only for the
+    // tiny partial redraw, then restore both carriers on their current channels.
+    if (btJam1Ok) btJam1.stopConstCarrier();
+    if (btJam2Ok) btJam2.stopConstCarrier();
+    sharedSpiPrepareDisplay(true);
+
+    uint8_t frame = btFrame++;
+    tft.fillRect(18, 160, 284, 31, BT_UI_PANEL);
+    for (int i = 0; i < 18; i++) {
+        int h = 4 + ((frame * 5 + i * 7) % 25);
+        uint16_t c = ((i + frame) % 3 == 0) ? BT_UI_GLOW : BT_UI_ACCENT;
+        tft.fillRect(26 + i * 15, 190 - h, 8, h, c);
+    }
+
+    tft.fillRect(112, 119, 184, 14, BT_UI_PANEL);
+    drawStringCustom(112, 122,
+                     "NRF CH " + String(btCh1) + " / " + String(btCh2),
+                     BT_UI_GLOW, 1);
+
+    sharedSpiPrepareRadio(true);
+    if (btJam1Ok) {
+        configureBtRadio(btJam1);
+        btJam1.startConstCarrier(RF24_PA_MAX, btCh1);
+    }
+    if (btJam2Ok) {
+        configureBtRadio(btJam2);
+        btJam2.startConstCarrier(RF24_PA_MAX, btCh2);
+    }
+}
+
 static void drawBtGlyph(int x, int y, uint8_t frame) {
-    tft.drawLine(x + 16, y + 4, x + 16, y + 52, TFT_CYAN);
-    tft.drawLine(x + 16, y + 4, x + 36, y + 16, TFT_CYAN);
-    tft.drawLine(x + 36, y + 16, x + 16, y + 28, TFT_CYAN);
-    tft.drawLine(x + 16, y + 28, x + 36, y + 40, TFT_CYAN);
-    tft.drawLine(x + 36, y + 40, x + 16, y + 52, TFT_CYAN);
-    tft.drawLine(x + 4, y + 16, x + 48, y + 44, TFT_WHITE);
-    tft.drawLine(x + 4, y + 40, x + 48, y + 12, TFT_WHITE);
+    tft.drawLine(x + 16, y + 4, x + 16, y + 52, BT_UI_GLOW);
+    tft.drawLine(x + 16, y + 4, x + 36, y + 16, BT_UI_GLOW);
+    tft.drawLine(x + 36, y + 16, x + 16, y + 28, BT_UI_GLOW);
+    tft.drawLine(x + 16, y + 28, x + 36, y + 40, BT_UI_GLOW);
+    tft.drawLine(x + 36, y + 40, x + 16, y + 52, BT_UI_GLOW);
+    tft.drawLine(x + 4, y + 16, x + 48, y + 44, BT_UI_TEXT);
+    tft.drawLine(x + 4, y + 40, x + 48, y + 12, BT_UI_TEXT);
     if ((frame / 4) % 2 == 0) {
-        tft.drawCircle(x + 16, y + 28, 26, TFT_BLUE);
-        tft.drawCircle(x + 16, y + 28, 32, TFT_CYAN);
+        tft.drawCircle(x + 16, y + 28, 26, BT_UI_ACCENT);
+        tft.drawCircle(x + 16, y + 28, 32, BT_UI_GLOW);
     }
 }
 
 static void drawBtScreen() {
     uint8_t frame = btFrame++;
     clearBtScreen();
-    tft.drawRect(0, 0, 320, 240, TFT_WHITE);
-    tft.fillRect(1, 1, 318, 36, isBtJamming ? TFT_BLUE : TFT_WHITE);
-    drawStringBig(10, 10, "BT JAMMER", isBtJamming ? TFT_WHITE : TFT_BLACK, 1);
-    drawStringRight(306, 14, isBtJamming ? "ON" : "READY",
-                    isBtJamming ? TFT_WHITE : TFT_BLACK, 1);
-    tft.drawFastHLine(0, 36, 320, TFT_WHITE);
+    btUiFrame("BT JAMMER", isBtJamming ? "ACTIVE" : "READY",
+              isBtJamming ? BT_UI_DANGER : BT_UI_OK);
+    btUiCard(10, 49, 300, 96, false,
+             isBtJamming ? BT_UI_DANGER : BT_UI_ACCENT);
 
-    drawBtGlyph(24, 68, frame);
-
-    drawStringBig(112, 64, isBtJamming ? "MODO MAX" : "ESPECTRO", TFT_WHITE, 1);
-    drawStringCustom(114, 88, isBtJamming ? "HOPPING 2.4GHz" : "BT LISTO",
-                     isBtJamming ? TFT_RED : TFT_GREEN, 2);
-    drawStringCustom(114, 116, "RADIOS: " + String(activeBtRadioCount()) + "/" + String(BT_JAMMER_RADIO_COUNT),
-                     activeBtRadioCount() > 0 ? TFT_GREEN : TFT_RED, 1);
+    drawBtGlyph(25, 63, frame);
+    drawStringBig(111, 60, isBtJamming ? "WIDEBAND" : "2.4 GHz LAB",
+                  BT_UI_TEXT, 1);
+    drawStringCustom(112, 83,
+                     isBtJamming ? "CHANNEL HOPPING" : "RADIOS READY",
+                     isBtJamming ? BT_UI_DANGER : BT_UI_OK, 1);
+    drawStringCustom(112, 103,
+                     "RADIOS " + String(activeBtRadioCount()) + "/" +
+                     String(BT_JAMMER_RADIO_COUNT),
+                     activeBtRadioCount() > 0 ? BT_UI_OK : BT_UI_DANGER, 1);
     if (isBtJamming) {
-        drawStringCustom(114, 132, "CH: " + String(btCh1) + "/" + String(btCh2),
-                         TFT_CYAN, 1);
+        drawStringCustom(112, 122,
+                         "NRF CH " + String(btCh1) + " / " + String(btCh2),
+                         BT_UI_GLOW, 1);
     }
 
+    btUiCard(10, 152, 300, 47, false,
+             isBtJamming ? BT_UI_DANGER : BT_UI_LINE);
     if (isBtJamming) {
-        tft.fillRect(18, 140, 284, 58, TFT_BLACK);
+        tft.fillRect(18, 160, 284, 31, BT_UI_PANEL);
         for (int i = 0; i < 18; i++) {
-            int h = 5 + ((frame + i * 3) % 45);
-            uint16_t c = (i % 3 == 0) ? TFT_CYAN : TFT_BLUE;
-            tft.fillRect(26 + i * 15, 192 - h, 8, h, c);
+            int h = 4 + ((frame + i * 3) % 25);
+            uint16_t c = (i % 3 == 0) ? BT_UI_GLOW : BT_UI_ACCENT;
+            tft.fillRect(26 + i * 15, 190 - h, 8, h, c);
         }
     } else {
-        tft.drawRect(112, 148, 152, 28, TFT_WHITE);
-        drawStringCustom(126, 157, "OK: START", TFT_GREEN, 2);
+        drawStringCentered(168, "OK TO START AUTHORIZED TEST",
+                           BT_UI_OK, 1, FONT_SMALL);
     }
 
-    tft.drawFastHLine(0, 214, 320, TFT_WHITE);
-    drawStringCustom(8, 222, "OK: TOGGLE", TFT_WHITE, 1);
-    drawStringRight(312, 222, "BACK/OK(H): BACK", TFT_WHITE, 1);
+    btUiFooter("OK: TOGGLE", "HOLD/BACK: EXIT",
+               isBtJamming ? BT_UI_DANGER : BT_UI_ACCENT);
 }
 
 void btJammerSetup() {
@@ -299,6 +338,7 @@ void btJammerLoop() {
         }
 
         updateBacklightPulse();
+        updateBtJammerAnimation();
     }
 }
 
