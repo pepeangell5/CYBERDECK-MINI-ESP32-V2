@@ -181,12 +181,21 @@ La interfaz evita repintar toda la pantalla en cada cambio siempre que es posibl
 
 ## GPS, wardriving y mapa
 
-GPS Tools incluye panel de estado, logger de trayectoria, waypoints, brújula por movimiento, snapshot, consola NMEA y modo wardriving. Este último registra en `/WARD_DRIVE.csv` las coordenadas y redes detectadas.
+GPS Tools incluye panel de estado, logger de trayectoria, waypoints, brújula por movimiento, snapshot, consola NMEA y modo wardriving. Al iniciar una sesión, este último crea automáticamente `/wardriving` y guarda un CSV independiente, por ejemplo `/wardriving/WD_23-09-2026_05-08-45.csv`, usando la fecha y hora UTC recibidas del GPS.
+
+- Los intervalos seleccionables son 2, 5, 10 y 20 segundos; 5 segundos es el valor predeterminado.
+- El escaneo WiFi es asíncrono, por lo que el UART GPS continúa procesándose mientras se buscan redes.
+- La trayectoria se registra aproximadamente cada segundo aunque un escaneo no encuentre redes.
+- Todas las redes de un escaneo utilizan la posición GPS más reciente al finalizarlo.
+- Pausar y reanudar conserva el archivo actual. Salir de Wardriving y comenzar otra sesión crea uno nuevo.
+- Si un nombre ya existe se agrega `_01`, `_02`, etc. Sin una fecha GPS reciente se usa `WD_UNDATED_0001.csv` y el siguiente consecutivo disponible.
+
+El encabezado se mantiene compatible: `UTC,Millis,Lat,Lng,Sat,HDOP,SSID,BSSID,RSSI,Channel,Auth`. Las filas de trayectoria dejan vacíos los cinco campos WiFi; las observaciones de red incluyen BSSID, RSSI, canal y autenticación. Esto permite separar la ruta de las detecciones y evita unir recorridos de días diferentes cuando se utilizan los archivos por sesión.
 
 El repositorio incluye la carpeta [`generar mapa wardriving script`](generar%20mapa%20wardriving%20script/README.md), con un programa en Python que genera un mapa HTML interactivo:
 
 ```powershell
-python ".\generar mapa wardriving script\wardrive_map.py" "D:\WARD_DRIVE.csv"
+python ".\generar mapa wardriving script\wardrive_map.py" "D:\WD_23-09-2026_05-08-45.csv"
 ```
 
 El resultado se guarda junto al CSV como `WARD_DRIVE_MAP.html` y se abre automáticamente en el navegador. No requiere paquetes de Python adicionales; para cargar el mapa base sí necesita conexión a Internet.
@@ -200,7 +209,7 @@ El resultado se guarda junto al CSV como `WARD_DRIVE_MAP.html` y se abre automá
 
 | Archivo | Origen |
 | --- | --- |
-| `/WARD_DRIVE.csv` | GPS Wardrive |
+| `/wardriving/WD_DD-MM-YYYY_HH-MM-SS.csv` | Sesión GPS Wardrive |
 | `/GPS_TRACK.csv` | GPS Track Logger |
 | `/GPS_MARKS.csv` | Dashboard / Waypoint Mark |
 | `/GPS_SNAPSHOT.txt` | Export Snapshot |

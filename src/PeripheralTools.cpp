@@ -154,6 +154,11 @@ static void drainGps(unsigned long ms) {
     }
 }
 
+static void serviceGps() {
+    beginGpsPort();
+    while (gpsSerial.available()) feedGpsByte((char)gpsSerial.read());
+}
+
 static bool beginSd() {
     if (sdStarted) return true;
 
@@ -965,39 +970,94 @@ static String wardriveCsvHeader() {
     return "UTC,Millis,Lat,Lng,Sat,HDOP,SSID,BSSID,RSSI,Channel,Auth\r\n";
 }
 
-static bool ensureWardriveCsv() {
-    if (sdFileHasData("/WARD_DRIVE.csv")) return true;
-    return sdAppendTextFile("/WARD_DRIVE.csv", wardriveCsvHeader());
+static const char* WARD_DRIVE_DIR = "/wardriving";
+
+static bool ensureWardriveDirectory() {
+    if (!beginSd()) return false;
+    if (!SD.exists(WARD_DRIVE_DIR)) return SD.mkdir(WARD_DRIVE_DIR);
+
+    File dir = SD.open(WARD_DRIVE_DIR, FILE_READ);
+    bool valid = dir && dir.isDirectory();
+    if (dir) dir.close();
+    return valid;
 }
 
-static bool appendWardriveScan(int& savedRows, int& seenNetworks) {
-    if (!gpsFreshFix(10000)) return false;
-    if (!ensureWardriveCsv()) return false;
+static bool createWardriveFile(const char* path) {
+    if (SD.exists(path)) return false;
+    return sdAppendTextFile(path, wardriveCsvHeader());
+}
 
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false, false);
-    delay(90);
+static bool createWardriveSessionFile(char* path, size_t pathSize) {
+    if (!path || pathSize == 0 || !ensureWardriveDirectory()) return false;
 
-    int n = WiFi.scanNetworks(false, true);
-    if (n < 0) {
-        WiFi.scanDelete();
-        WiFi.mode(WIFI_OFF);
+    bool freshGpsTime = gps.date.isValid() && gps.time.isValid() &&
+                        gps.date.age() < 10000 && gps.time.age() < 10000;
+    if (freshGpsTime) {
+        char base[48];
+        snprintf(base, sizeof(base),
+                 "%s/WD_%02d-%02d-%04d_%02d-%02d-%02d",
+                 WARD_DRIVE_DIR,
+                 gps.date.day(), gps.date.month(), gps.date.year(),
+                 gps.time.hour(), gps.time.minute(), gps.time.second());
+
+        for (uint8_t suffix = 0; suffix < 100; suffix++) {
+            int written = suffix == 0
+                ? snprintf(path, pathSize, "%s.csv", base)
+                : snprintf(path, pathSize, "%s_%02u.csv", base,
+                           (unsigned int)suffix);
+            if (written < 0 || (size_t)written >= pathSize) return false;
+            if (!SD.exists(path)) return createWardriveFile(path);
+        }
         return false;
     }
 
-    seenNetworks = n;
+    // Respaldo para permitir registrar aun si el GPS no ha entregado fecha UTC.
+    for (uint16_t index = 1; index <= 9999; index++) {
+        int written = snprintf(path, pathSize,
+                               "%s/WD_UNDATED_%04u.csv",
+                               WARD_DRIVE_DIR, (unsigned int)index);
+        if (written < 0 || (size_t)written >= pathSize) return false;
+        if (!SD.exists(path)) return createWardriveFile(path);
+    }
+    return false;
+}
+
+static bool appendWardriveTrackPoint(const char* path, int& savedPoints) {
+    if (!gpsFreshFix(3000)) return false;
+
+    String row;
+    row.reserve(96);
+    row += gpsUtcStamp() + ",";
+    row += String(millis()) + ",";
+    row += String(gps.location.lat(), 6) + ",";
+    row += String(gps.location.lng(), 6) + ",";
+    row += String(gpsSatCount()) + ",";
+    row += gpsHdopText();
+    // Las cinco columnas WiFi vacias identifican una fila de trayectoria.
+    row += ",,,,,\r\n";
+
+    if (!sdAppendTextFile(path, row)) return false;
+    savedPoints++;
+    return true;
+}
+
+static bool appendWardriveScanResults(const char* path, int networkCount,
+                                      int& savedRows) {
+    if (!gpsFreshFix(3000)) return false;
+
     String batch;
-    batch.reserve(max(256, n * 104));
+    batch.reserve(max(256, networkCount * 104));
 
     String utc = gpsUtcStamp();
+    String capturedAt = String(millis());
     String lat = String(gps.location.lat(), 6);
     String lng = String(gps.location.lng(), 6);
     String sat = String(gpsSatCount());
     String hdop = gpsHdopText();
 
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < networkCount; i++) {
         batch += utc + ",";
-        batch += String(millis()) + ",";
+        batch += capturedAt + ",";
         batch += lat + ",";
         batch += lng + ",";
         batch += sat + ",";
@@ -1009,12 +1069,9 @@ static bool appendWardriveScan(int& savedRows, int& seenNetworks) {
         batch += String(wifiAuthName(WiFi.encryptionType(i))) + "\r\n";
     }
 
-    WiFi.scanDelete();
-    WiFi.mode(WIFI_OFF);
-
     if (batch.length() == 0) return true;
-    if (!sdAppendTextFile("/WARD_DRIVE.csv", batch)) return false;
-    savedRows += n;
+    if (!sdAppendTextFile(path, batch)) return false;
+    savedRows += networkCount;
     return true;
 }
 
@@ -1025,22 +1082,28 @@ static void runWardrivingLogger() {
     systemUiFooter("OK: START/PAUSE  UP/DN: RATE", "BACK: EXIT");
     beep(1800, 25);
 
-    const int intervals[] = { 10, 20, 30, 60 };
+    const int intervals[] = { 2, 5, 10, 20 };
     int intervalIdx = 1;
     bool logging = false;
-    bool sdOk = ensureWardriveCsv();
+    bool scanRunning = false;
+    bool sdOk = ensureWardriveDirectory();
+    bool sessionReady = false;
+    char sessionPath[80] = "";
     unsigned long lastDraw = 0;
-    unsigned long lastScan = 0;
+    unsigned long lastScanStart = 0;
+    unsigned long lastTrackSave = 0;
     int savedRows = 0;
+    int savedTrackPoints = 0;
     int lastSeen = 0;
     char status[48] = "";
 
-    snprintf(status, sizeof(status), sdOk ? "Ready: waits for fresh GPS fix" : "SD error");
+    snprintf(status, sizeof(status), sdOk ? "Ready: creates a new session file" : "SD error");
 
     bool exitTool = false;
     while (!exitTool) {
-        drainGps(70);
+        serviceGps();
         NavAction action = readNavAction(120);
+        serviceGps();
 
         if (action == NAV_BACK) {
             exitTool = true;
@@ -1049,8 +1112,33 @@ static void runWardrivingLogger() {
             if (held) {
                 exitTool = true;
             } else if (sdOk) {
-                logging = !logging;
-                snprintf(status, sizeof(status), logging ? "Wardriving active" : "Paused");
+                if (!logging && !sessionReady) {
+                    sessionReady = createWardriveSessionFile(sessionPath,
+                                                             sizeof(sessionPath));
+                    if (!sessionReady) {
+                        sdOk = false;
+                        snprintf(status, sizeof(status), "SD error creating session file");
+                    }
+                }
+
+                if (sessionReady) {
+                    logging = !logging;
+                    snprintf(status, sizeof(status), logging ? "Wardriving active" : "Paused");
+                }
+
+                if (logging) {
+                    WiFi.mode(WIFI_STA);
+                    WiFi.disconnect(false, false);
+                    delay(90);
+                    serviceGps();
+                    lastScanStart = millis() -
+                        (unsigned long)intervals[intervalIdx] * 1000UL;
+                    lastTrackSave = millis() - 1000UL;
+                } else {
+                    WiFi.scanDelete();
+                    WiFi.mode(WIFI_OFF);
+                    scanRunning = false;
+                }
                 beep(logging ? 2400 : 900, 40);
                 lastDraw = 0;
                 flushNavInput();
@@ -1064,30 +1152,74 @@ static void runWardrivingLogger() {
             lastDraw = 0;
         }
 
-        if (logging && sdOk &&
-            millis() - lastScan >= (unsigned long)intervals[intervalIdx] * 1000UL) {
-            if (!gpsFreshFix(10000)) {
-                snprintf(status, sizeof(status), "Waiting GPS fix: no rows saved");
-            } else {
-                bool ok = appendWardriveScan(savedRows, lastSeen);
-                snprintf(status, sizeof(status), ok ? "Scan OK: %d networks" : "Scan/SD error", lastSeen);
-                beep(ok ? 2600 : 900, 20);
+        if (logging && sdOk && millis() - lastTrackSave >= 1000UL) {
+            bool hasFix = gpsFreshFix(3000);
+            if (!hasFix) {
+                snprintf(status, sizeof(status), "Waiting for fresh GPS fix");
+            } else if (!appendWardriveTrackPoint(sessionPath, savedTrackPoints)) {
+                sdOk = false;
+                snprintf(status, sizeof(status), "SD error writing GPS track");
             }
-            lastScan = millis();
+            lastTrackSave = millis();
             lastDraw = 0;
+        }
+
+        if (logging && sdOk && gpsFreshFix(3000) && !scanRunning &&
+            millis() - lastScanStart >= (unsigned long)intervals[intervalIdx] * 1000UL) {
+            WiFi.scanDelete();
+            int scanState = WiFi.scanNetworks(true, true);
+            lastScanStart = millis();
+            if (scanState == WIFI_SCAN_RUNNING) {
+                scanRunning = true;
+                snprintf(status, sizeof(status), "Scanning WiFi...");
+            } else {
+                snprintf(status, sizeof(status), "WiFi scan start error");
+                beep(900, 20);
+            }
+            lastDraw = 0;
+        }
+
+        if (scanRunning) {
+            int scanResult = WiFi.scanComplete();
+            if (scanResult >= 0) {
+                serviceGps();
+                lastSeen = scanResult;
+                bool hasFix = gpsFreshFix(3000);
+                bool ok = hasFix && appendWardriveScanResults(sessionPath, scanResult,
+                                                              savedRows);
+                if (!hasFix) {
+                    snprintf(status, sizeof(status), "Scan done: no fresh GPS fix");
+                } else {
+                    snprintf(status, sizeof(status), ok ? "Scan OK: %d networks" : "Scan/SD error", lastSeen);
+                    if (!ok) sdOk = false;
+                }
+                beep(ok ? 2600 : 900, 20);
+                WiFi.scanDelete();
+                scanRunning = false;
+                lastDraw = 0;
+            } else if (scanResult == WIFI_SCAN_FAILED) {
+                snprintf(status, sizeof(status), "WiFi scan failed");
+                beep(900, 20);
+                WiFi.scanDelete();
+                scanRunning = false;
+                lastDraw = 0;
+            }
         }
 
         if (millis() - lastDraw > 350) {
             tft.fillRect(8, 42, 304, 166, TFT_BLACK);
             drawStringCustom(12, 48, logging ? "REC" : "PAUSED",
                              logging ? TFT_GREEN : TFT_YELLOW, 2);
-            drawStringCustom(112, 52, "/WARD_DRIVE.csv", sdOk ? TFT_CYAN : TFT_RED, 1);
+            const char* sessionName = sessionReady ? strrchr(sessionPath, '/') : nullptr;
+            if (sessionName) sessionName++;
+            else sessionName = "/wardriving";
+            drawStringFit(112, 52, String(sessionName), sdOk ? TFT_CYAN : TFT_RED, 196, 1);
             drawStringCustom(12, 80, "Interval: " + String(intervals[intervalIdx]) + "s",
                              TFT_WHITE, 1);
-            drawStringCustom(150, 80, "Rows: " + String(savedRows), TFT_GREEN, 1);
-            drawStringCustom(230, 80, "Seen: " + String(lastSeen), TFT_WHITE, 1);
+            drawStringCustom(150, 80, "AP: " + String(savedRows), TFT_GREEN, 1);
+            drawStringCustom(230, 80, "GPS: " + String(savedTrackPoints), TFT_CYAN, 1);
 
-            bool fix = gpsFreshFix(10000);
+            bool fix = gpsFreshFix(3000);
             drawStringCustom(12, 108, "GPS: " + String(fix ? "FIX" : "WAIT"),
                              fix ? TFT_GREEN : TFT_YELLOW, 1);
             drawStringCustom(112, 108, "Sat:" + String(gpsSatCount()) + " HDOP:" + gpsHdopText(),

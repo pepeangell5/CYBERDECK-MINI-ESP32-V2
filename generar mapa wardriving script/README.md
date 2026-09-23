@@ -26,11 +26,11 @@ No hace falta instalar paquetes con `pip`: el script utiliza únicamente la bibl
 ## Uso rápido
 
 1. Retira correctamente la microSD del cyberdeck.
-2. Copia `WARD_DRIVE.csv` a tu computadora.
+2. Abre `/wardriving` en la microSD y copia el CSV de la sesión a tu computadora.
 3. Desde la raíz del repositorio ejecuta:
 
 ```powershell
-python ".\generar mapa wardriving script\wardrive_map.py" "D:\WARD_DRIVE.csv"
+python ".\generar mapa wardriving script\wardrive_map.py" "D:\WD_23-09-2026_05-08-45.csv"
 ```
 
 Se creará `WARD_DRIVE_MAP.html` en la misma carpeta del CSV y se abrirá automáticamente.
